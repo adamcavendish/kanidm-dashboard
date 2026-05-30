@@ -1,0 +1,12 @@
+token = "<generated service account api token>"
+schedule = "*/5 * * * * * *"
+
+instance_display_name = "Kanidm Local"
+instance_url = "https://localhost:9443"
+
+mail_from_address = "kanidm@example.test"
+mail_reply_to_address = "support@example.test"
+mail_relay = "mailpit"
+mail_username = "kanidm-local"
+mail_password = "kanidm-local"
+mail_connect_timeout_seconds = 5

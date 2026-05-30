@@ -1,0 +1,3 @@
+uri = "https://kanidm:8443"
+verify_ca = false
+verify_hostnames = false

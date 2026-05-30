@@ -1,0 +1,20 @@
+{
+	auto_https off
+}
+
+:8081 {
+	encode zstd gzip
+
+	handle /status {
+		respond "healthy" 200
+	}
+
+	handle /docs/v1/openapi.json {
+		header Content-Type "application/json"
+		respond `{"openapi":"3.0.0","info":{"title":"Mock Kanidm upstream","version":"container-smoke"}}` 200
+	}
+
+	handle {
+		respond "mock kanidm upstream" 200
+	}
+}

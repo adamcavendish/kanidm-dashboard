@@ -1,0 +1,16 @@
+[book]
+title = "Kanidm Dashboard"
+description = "A modern web console for the Kanidm identity provider"
+authors = ["Adam Cavendish"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/adamcavendish/kanidm-dashboard"
+edit-url-template = "https://github.com/adamcavendish/kanidm-dashboard/edit/main/docs/{path}"
+
+[output.html.search]
+enable = true

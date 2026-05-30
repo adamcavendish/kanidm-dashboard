@@ -1,0 +1,18 @@
+services:
+  mock-kanidm:
+    image: caddy:2-alpine
+    volumes:
+      - ./mock-kanidm.Caddyfile:/etc/caddy/Caddyfile:ro
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: deploy/container/Dockerfile
+    depends_on:
+      - mock-kanidm
+    environment:
+      KANIDM_UPSTREAM: "http://mock-kanidm:8081"
+    ports:
+      - "127.0.0.1:${CONTAINER_SMOKE_PORT:-18080}:8080"
+    volumes:
+      - "${DASHBOARD_CONFIG_SMOKE_PATH:?DASHBOARD_CONFIG_SMOKE_PATH is required}:/config/dashboard.config.json:ro"

@@ -1,0 +1,11 @@
+bindaddress = "[::]:8443"
+db_path = "/var/lib/kanidm/kanidm.db"
+domain = "localhost"
+origin = "https://localhost:9443"
+tls_chain = "/data/tls/chain.pem"
+tls_key = "/data/tls/key.pem"
+
+[online_backup]
+path = "/var/lib/kanidm/backups/"
+schedule = "00 22 * * *"
+versions = 7

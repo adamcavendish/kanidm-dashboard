@@ -1,0 +1,80 @@
+services:
+  kanidm:
+    image: kanidm/server:1.10.3
+    restart: unless-stopped
+    volumes:
+      - ./kanidm:/data
+      - kanidm-db:/var/lib/kanidm
+    ports:
+      - "18443:8443"
+
+  dashboard-proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      kanidm:
+        condition: service_started
+    ports:
+      - "9443:9443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../dist:/srv/dashboard:ro
+      - ../../public/dashboard.config.local-kanidm.json:/srv/config/dashboard.config.json:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    profiles: ["mail"]
+    environment:
+      MP_SMTP_BIND_ADDR: 0.0.0.0:465
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+      MP_SMTP_TLS_CERT: /data/tls/chain.pem
+      MP_SMTP_TLS_KEY: /data/tls/key.pem
+      MP_SMTP_REQUIRE_TLS: "true"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+    ports:
+      - "11025:465"
+      - "18025:8025"
+    volumes:
+      - ./mailpit/tls:/data/tls:ro
+
+  kanidm-mail-sender:
+    image: kanidm/tools:1.10.3
+    restart: unless-stopped
+    profiles: ["mail"]
+    depends_on:
+      kanidm:
+        condition: service_started
+      mailpit:
+        condition: service_started
+    volumes:
+      - ./kanidm:/data:ro
+      - ./mailpit/tls/ca.pem:/usr/share/pki/trust/anchors/mailpit.pem:ro
+    entrypoint: ["sh", "-lc"]
+    command:
+      - >
+        /sbin/update-ca-certificates >/dev/null &&
+        install -m 0400 -o 65534 -g 499 /data/mail-sender.local.toml /tmp/mail-sender.toml &&
+        exec /sbin/runuser -u nobody --
+        /sbin/kanidm-mail-sender
+        -c /data/mail-sender-client.toml
+        -m /tmp/mail-sender.toml
+
+  kanidm-tools:
+    image: kanidm/tools:1.10.3
+    profiles: ["tools"]
+    volumes:
+      - ./kanidm:/data:ro
+      - kanidm-cli-config:/root/.config
+      - kanidm-cli-cache:/root/.cache
+    network_mode: host
+    entrypoint: ["kanidm"]
+
+volumes:
+  kanidm-db:
+  kanidm-cli-config:
+  kanidm-cli-cache:
+  caddy-data:
+  caddy-config:

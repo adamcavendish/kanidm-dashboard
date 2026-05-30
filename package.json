@@ -1,0 +1,33 @@
+{
+  "name": "kanidm-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "check": "vp check",
+    "test": "vp test",
+    "test:e2e:kanidm": "vp run e2e-kanidm",
+    "build": "vp build",
+    "preview": "vp preview"
+  },
+  "dependencies": {
+    "lucide-solid": "^1.17.0",
+    "solid-js": "^1.9.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.60.0",
+    "typescript": "^5.7.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.23",
+    "vite-plugin-solid": "^2.11.12",
+    "vite-plus": "latest"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.23",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+  },
+  "packageManager": "npm@11.16.0"
+}

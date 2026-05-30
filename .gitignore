@@ -1,0 +1,11 @@
+node_modules
+dist
+.gstack
+.DS_Store
+*.local
+*.tsbuildinfo
+deploy/local/kanidm/tls/
+deploy/local/kanidm/mail-sender.local.toml
+deploy/local/mailpit/tls/
+src/generated/kanidm-sdk/
+docs/book/

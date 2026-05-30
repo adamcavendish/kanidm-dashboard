@@ -1,0 +1,22 @@
+{
+  "siteName": "Kanidm Dashboard",
+  "logoUrl": "",
+  "loginMessage": "Sign in to continue to your company applications and identity settings.",
+  "adminGroup": "idm_admins",
+  "dataSource": {
+    "mode": "kanidm",
+    "apiBasePath": "",
+    "openApiPath": "/docs/v1/openapi.json"
+  },
+  "theme": {
+    "mode": "dark",
+    "preset": "orb",
+    "accentColor": "#007aff",
+    "successColor": "#30d158",
+    "warningColor": "#ff9f0a",
+    "dangerColor": "#ff453a",
+    "surfaceIntensity": "frosted",
+    "statusPalette": "kanidm",
+    "logoTreatment": "both"
+  }
+}

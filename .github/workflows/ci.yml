@@ -1,0 +1,248 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_real_kanidm:
+        description: Run the real Kanidm integration suite
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Generate SDK (shared dependency) ─────────────────────────────
+
+  generate-sdk:
+    name: Generate TypeScript SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install openapi-nexus
+        run: cargo binstall --no-confirm --force openapi-nexus@0.1.13
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: just generate-sdk
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: generated-sdk
+          path: src/generated/kanidm-sdk
+          retention-days: 1
+
+  # ── Gate jobs (run in parallel, depend on generate-sdk) ──────────
+
+  check:
+    name: Type-check + lint
+    runs-on: ubuntu-latest
+    needs: generate-sdk
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: generated-sdk
+          path: src/generated/kanidm-sdk
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: just install
+      - run: just check
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: generate-sdk
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: generated-sdk
+          path: src/generated/kanidm-sdk
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: just install
+      - run: just test
+
+  build:
+    name: Build + audit + container smoke
+    runs-on: ubuntu-latest
+    needs: generate-sdk
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: generated-sdk
+          path: src/generated/kanidm-sdk
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: just install
+      - run: just build
+      - run: just audit
+      - run: vp exec playwright install --with-deps chromium
+      - run: just container-smoke
+
+  mdbook:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: latest
+
+      - run: mdbook build docs
+
+  # ── Gate ─────────────────────────────────────────────────────────
+
+  basics:
+    name: Fast gate
+    runs-on: ubuntu-latest
+    needs:
+      - check
+      - test
+      - build
+      - mdbook
+    timeout-minutes: 1
+
+    steps:
+      - run: exit 0
+
+  # ── Integration (gated by basics) ────────────────────────────────
+
+  real-kanidm:
+    name: Real Kanidm integration
+    runs-on: ubuntu-latest
+    needs: basics
+    timeout-minutes: 45
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_real_kanidm)
+
+    env:
+      KANIDM_USERNAME: idm_admin
+      KANIDM_URL: https://localhost:18443
+      KANIDM_DASHBOARD_URL: https://localhost:9443
+      KANIDM_INSTANCE_URL: https://localhost:9443
+      KANIDM_INSECURE_TLS: "true"
+      MAILPIT_API_URL: http://localhost:18025
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: generated-sdk
+          path: src/generated/kanidm-sdk
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: just install
+      - run: vp exec playwright install --with-deps chromium
+
+      - name: Start local Kanidm
+        run: ./scripts/dev-kanidm-bootstrap.sh
+
+      - name: Recover local idm_admin password
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(docker compose -f deploy/local/docker-compose.yml exec -T kanidm kanidmd recover-account idm_admin -c /data/server.toml 2>&1)"
+          password="$(printf '%s\n' "$output" | sed -nE 's/.*new_password:[[:space:]]*"([^"]+)".*/\1/p' | tail -n 1)"
+          if [ -z "$password" ]; then
+            printf '%s\n' "$output"
+            echo "Could not parse idm_admin recovery password." >&2
+            exit 1
+          fi
+          echo "::add-mask::$password"
+          echo "KANIDM_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - run: just build
+      - run: just audit
+      - run: docker compose -f deploy/local/docker-compose.yml up -d dashboard-proxy
+      - run: just auth-smoke
+      - run: vp run credential-update-smoke
+      - run: vp run e2e-recovery-kanidm
+      - run: ./scripts/dev-kanidm-mail.sh
+      - run: vp run e2e-recovery-mail-kanidm
+      - run: vp run e2e-add-user-recovery-mail-kanidm
+      - run: just e2e-kanidm
+      - run: just e2e-webauthn
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: real-kanidm-screenshots
+          path: /tmp/kanidm-dashboard-*.png
+          if-no-files-found: ignore

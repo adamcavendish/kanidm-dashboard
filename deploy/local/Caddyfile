@@ -1,0 +1,44 @@
+{
+	local_certs
+}
+
+https://localhost:9443 {
+	encode zstd gzip
+
+	@dashboardConfig path /dashboard.config.json
+	header @dashboardConfig Cache-Control "no-store"
+	header @dashboardConfig Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'"
+	header @dashboardConfig Referrer-Policy "same-origin"
+	header @dashboardConfig X-Content-Type-Options "nosniff"
+	header @dashboardConfig X-Frame-Options "DENY"
+	handle @dashboardConfig {
+		root * /srv/config
+		file_server
+	}
+
+	@staticAssets path /assets/*
+	header @staticAssets Cache-Control "public, max-age=31536000, immutable"
+	header @staticAssets Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'"
+	header @staticAssets Referrer-Policy "same-origin"
+	header @staticAssets X-Content-Type-Options "nosniff"
+	header @staticAssets X-Frame-Options "DENY"
+
+	@kanidm path /ui* /v1* /oauth2* /pkg* /hpkg* /.well-known* /docs* /status
+	handle @kanidm {
+		reverse_proxy https://kanidm:8443 {
+			transport http {
+				tls_insecure_skip_verify
+			}
+		}
+	}
+
+	handle {
+		header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'"
+		header Referrer-Policy "same-origin"
+		header X-Content-Type-Options "nosniff"
+		header X-Frame-Options "DENY"
+		root * /srv/dashboard
+		try_files {path} /index.html
+		file_server
+	}
+}
