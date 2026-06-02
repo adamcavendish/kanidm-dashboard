@@ -87,26 +87,13 @@ import KeyValue from "./components/key-value";
 import ReviewPanel from "./components/review-panel";
 import AppIcon from "./components/app-icon";
 
-const commonScopes = [
-  "openid",
-  "profile",
-  "email",
-  "groups",
-  "ssh_publickey",
-  "oci_admin",
-  "oci_push",
-  "oci_pull",
-];
-
+const standardScopes = ["openid", "profile", "email", "groups", "ssh_publickey"];
 const scopeDetails: Record<string, string> = {
   openid: "Required for OIDC",
   profile: "User profile claim",
   email: "Email claim",
   groups: "Group claim",
   ssh_publickey: "SSH key claim",
-  oci_admin: "Orb Chrysa registry admin",
-  oci_push: "Orb Chrysa push scope",
-  oci_pull: "Orb Chrysa pull scope",
 };
 
 const returnAfterLoginKey = "kanidm-dashboard-return-after-login";
@@ -4066,15 +4053,37 @@ function NewApplicationPage() {
       groupId,
       scopes: uniqueValues(scopesForGroup(groupId)),
     }));
+  const extraScopes = () => {
+    const seen = new Set(standardScopes);
+    const extra: string[] = [];
+    for (const app of state().apps) {
+      for (const scope of app.scopes) {
+        if (!seen.has(scope)) {
+          seen.add(scope);
+          extra.push(scope);
+        }
+      }
+    }
+    return extra;
+  };
+  const [customScope, setCustomScope] = createSignal("");
+  const customScopes = () => input().scopes.filter((s) => !standardScopes.includes(s));
+
+  function addCustomScope() {
+    const scope = customScope().trim();
+    if (!scope || input().scopes.includes(scope)) return;
+    setInput({ ...input(), scopes: [...input().scopes, scope] });
+    setCustomScope("");
+  }
+
   const canSubmit = () =>
     input().name.trim() &&
     input().displayName.trim() &&
     input().landingUrl.trim() &&
     redirectUris().length > 0 &&
     input().allowedGroups.length > 0 &&
-    effectiveScopeMaps().every(
-      (scopeMap) => scopeMap.scopes.length > 0 && scopeMap.scopes.includes("openid"),
-    );
+    input().scopes.length > 0 &&
+    input().scopes.includes("openid");
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -4097,54 +4106,6 @@ function NewApplicationPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function applyOrbChrysaDefaults() {
-    const registryAdmins = state().groups.find((group) => group.name === "registry_admins");
-    const registryDevelopers = state().groups.find((group) => group.name === "registry_developers");
-    const defaultGroupIds = [registryAdmins?.id, registryDevelopers?.id].filter(
-      (groupId): groupId is string => Boolean(groupId),
-    );
-    setRedirectText("http://localhost:5050/oauth2/callback");
-    setInput((previous) => ({
-      ...previous,
-      name: previous.name || "orb-chrysa",
-      displayName: previous.displayName || "Orb Chrysa Container Registry",
-      landingUrl: previous.landingUrl || "http://localhost:5050",
-      clientType: "confidential",
-      allowedGroups: uniqueValues([...previous.allowedGroups, ...defaultGroupIds]),
-      scopes: uniqueValues([
-        ...previous.scopes,
-        "openid",
-        "profile",
-        "email",
-        "oci_admin",
-        "oci_push",
-        "oci_pull",
-      ]),
-      scopeMaps: [
-        ...(previous.scopeMaps ?? []).filter(
-          (scopeMap) => !defaultGroupIds.includes(scopeMap.groupId),
-        ),
-        ...(registryAdmins
-          ? [
-              {
-                groupId: registryAdmins.id,
-                scopes: ["openid", "profile", "email", "oci_admin"],
-              },
-            ]
-          : []),
-        ...(registryDevelopers
-          ? [
-              {
-                groupId: registryDevelopers.id,
-                scopes: ["openid", "profile", "email", "oci_push", "oci_pull"],
-              },
-            ]
-          : []),
-      ],
-    }));
-    setReview(false);
   }
 
   function toggleAccessGroup(groupId: string) {
@@ -4179,9 +4140,6 @@ function NewApplicationPage() {
         <form class="wizard-layout" onSubmit={submit}>
           <div class="form-stack">
             <GlassPanel title="Application">
-              <button class="secondary-action" type="button" onClick={applyOrbChrysaDefaults}>
-                <AppWindow size={16} /> Use Orb Chrysa defaults
-              </button>
               <TextField
                 label="System name"
                 value={input().name}
@@ -4233,17 +4191,77 @@ function NewApplicationPage() {
                   required
                 />
               </label>
+              <label>
+                Custom scope
+                <input
+                  value={customScope()}
+                  onInput={(event) => setCustomScope(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addCustomScope();
+                    }
+                  }}
+                  placeholder="Type a scope and press Enter"
+                />
+              </label>
               <OptionGrid
-                options={commonScopes.map((scope) => ({
+                options={standardScopes.map((scope) => ({
                   id: scope,
                   label: scope,
-                  detail: scopeDetails[scope] ?? "Optional claim",
+                  detail: scopeDetails[scope] ?? "",
                 }))}
                 selected={input().scopes}
                 onToggle={(scope) =>
                   setInput({ ...input(), scopes: toggleValue(input().scopes, scope) })
                 }
               />
+              <Show when={extraScopes().length > 0}>
+                <div class="suggestion-row">
+                  <span class="muted">From existing apps:</span>
+                  <For each={extraScopes()}>
+                    {(scope) => (
+                      <button
+                        class="tag-button"
+                        type="button"
+                        disabled={input().scopes.includes(scope)}
+                        onClick={() =>
+                          setInput({
+                            ...input(),
+                            scopes: [...new Set([...input().scopes, scope])],
+                          })
+                        }
+                      >
+                        + {scope}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <Show when={customScopes().length > 0}>
+                <div class="option-grid">
+                  <For each={customScopes()}>
+                    {(scope) => (
+                      <button
+                        class="option-card custom-scope"
+                        type="button"
+                        onClick={() =>
+                          setInput({
+                            ...input(),
+                            scopes: input().scopes.filter((s) => s !== scope),
+                          })
+                        }
+                      >
+                        <span>
+                          <Check size={16} />
+                        </span>
+                        <strong>{scope}</strong>
+                        <small>Custom scope</small>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </GlassPanel>
             <GlassPanel title="Access groups">
               <OptionGrid
@@ -4265,7 +4283,7 @@ function NewApplicationPage() {
                           <small>Scopes granted through this access group</small>
                         </div>
                         <div class="scope-map-options">
-                          <For each={commonScopes}>
+                          <For each={[...standardScopes, ...extraScopes()]}>
                             {(scope) => {
                               const selected = () => scopesForGroup(group.id).includes(scope);
                               return (
