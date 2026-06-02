@@ -1027,6 +1027,38 @@ td small {
   color: var(--text);
 }
 
+.suggestion-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag-button {
+  font-size: 0.78rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.tag-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.option-card.custom-scope {
+  border-color: color-mix(in srgb, var(--success) 52%, var(--line));
+  background: color-mix(in srgb, var(--success) 10%, var(--panel));
+}
+
+.option-card.custom-scope:hover {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+}
+
 .scope-map-summary {
   display: grid;
   gap: 4px;
