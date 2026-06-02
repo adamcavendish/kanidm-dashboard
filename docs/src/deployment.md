@@ -1,74 +1,164 @@
 # Deployment
 
-## Production build
+The dashboard is distributed as a container image that bundles the static SPA
+with an embedded Caddy reverse proxy. Caddy serves the dashboard and proxies
+Kanidm API routes internally — you only need to expose one port.
+
+## Quick start
 
 ```bash
-just build
+docker run -d -p 8080:8080 \
+  -e KANIDM_UPSTREAM=https://your-kanidm-server:8443 \
+  ghcr.io/adamcavendish/kanidm-dashboard:0.0.2
 ```
 
-Outputs to `dist/`. The build produces:
+Open `http://localhost:8080`.
 
-- `index.html` — SPA entry point
-- `assets/index-<hash>.js` — bundled JavaScript
-- `assets/index-<hash>.css` — bundled CSS
+If your Kanidm server runs in the same Docker network, use the container name
+as the upstream:
 
-## Caddy reverse proxy
+```yaml
+# docker-compose.yml
+services:
+  kanidm:
+    # ... your existing Kanidm setup ...
 
-The dashboard is designed to be served behind a reverse proxy that also proxies
-Kanidm API routes. An example Caddy configuration:
+  dashboard:
+    image: ghcr.io/adamcavendish/kanidm-dashboard:0.0.2
+    environment:
+      KANIDM_UPSTREAM: https://kanidm:8443
+    ports:
+      - "8080:8080"
+```
+
+A full reference compose file is available at
+[`deploy/container/docker-compose.yml`](https://github.com/adamcavendish/kanidm-dashboard/blob/main/deploy/container/docker-compose.yml).
+
+## TLS between dashboard and Kanidm
+
+The dashboard communicates with Kanidm over HTTPS. The container's Caddy
+server uses the system trust store — it works out of the box when Kanidm
+has a publicly trusted certificate (e.g. Let's Encrypt).
+
+### Self-signed certificates
+
+If Kanidm uses a self-signed certificate (the default when setting up
+`kanidmd`), you need two things:
+
+1. Mount the Kanidm CA certificate into the container
+2. Mount a custom Caddyfile that trusts it
+
+**Where to find `chain.pem`:** Kanidm generates this during initial setup.
+It is typically at `/data/certs/chain.pem` inside the Kanidm container, or
+in the directory you mounted to `kanidm`'s `/data/certs`.
+
+**Custom Caddyfile** (`dashboard-caddyfile`):
 
 ```caddyfile
-:443 {
-    tls internal
+{
+	auto_https off
+}
 
-    handle /ui/* {
-        root * /srv/dashboard
-        file_server
+:8080 {
+	encode zstd gzip
+
+	@dashboardConfig path /dashboard.config.json
+	handle @dashboardConfig {
+		header Cache-Control "no-store"
+		root * /config
+		file_server
+	}
+
+	@kanidm path /ui* /v1* /oauth2* /pkg* /hpkg* /.well-known* /docs* /status
+	handle @kanidm {
+		reverse_proxy {$KANIDM_UPSTREAM:https://kanidm:8443} {
+			transport http {
+				tls_server_name kanidm.example.com
+				tls_trusted_ca_certs /certs/chain.pem
+			}
+		}
+	}
+
+	handle {
+		root * /srv/dashboard
+		try_files {path} /index.html
+		file_server
+	}
+}
+```
+
+Replace `kanidm.example.com` with your Kanidm server's domain name — the
+one in the certificate's Subject Alternative Name.
+
+**Docker Compose:**
+
+```yaml
+dashboard:
+  image: ghcr.io/adamcavendish/kanidm-dashboard:0.0.2
+  environment:
+    KANIDM_UPSTREAM: https://kanidm:8443
+  volumes:
+    - ./dashboard-caddyfile:/etc/caddy/Caddyfile:ro
+    - ./certs/chain.pem:/certs/chain.pem:ro
+  ports:
+    - "8080:8080"
+```
+
+| Directive                  | Purpose                                                                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tls_server_name`          | Overrides the TLS SNI to match the certificate's domain. The Docker container hostname (`kanidm`) differs from the domain in the certificate. |
+| `tls_trusted_ca_certs`     | Trusts the Kanidm CA certificate so the self-signed cert is accepted.                                                                         |
+| `tls_insecure_skip_verify` | **Avoid.** Disables all TLS verification — accepts any certificate. Use only as a temporary workaround.                                       |
+
+### Public certificates
+
+No extra configuration is needed. The dashboard's Caddy server trusts
+public CAs by default. Set `KANIDM_UPSTREAM` to your Kanidm server's
+HTTPS URL and the TLS handshake will verify normally.
+
+## Reverse proxy (standalone)
+
+If you prefer to run the dashboard without the container's embedded Caddy,
+serve `dist/` with your own reverse proxy:
+
+```bash
+# Build from source
+vp build
+# Serve dist/ with your web server, proxying Kanidm routes
+```
+
+Example Caddy configuration:
+
+```caddyfile
+kanidm.example.com {
+    handle /v1/* {
+        reverse_proxy https://kanidm-server:8443
     }
-
-    handle_path /v1/* {
-        reverse_proxy kanidm:8443
+    handle /oauth2/* {
+        reverse_proxy https://kanidm-server:8443
     }
-
     handle {
         root * /srv/dashboard
         try_files {path} /index.html
+        file_server
     }
 }
 ```
 
-Key points:
-
-- Static assets are served directly from the filesystem.
-- Kanidm API routes (`/v1`, `/oauth2`, `/docs`) are proxied to the Kanidm
-  server.
-- SPA fallback: all other routes serve `index.html` for client-side routing.
-
-## Container image
-
-```bash
-vp build
-docker build -f deploy/container/Dockerfile -t kanidm-dashboard .
-```
-
-The container includes the dashboard static assets and a Caddy server
-configured for same-origin Kanidm proxying.
-
-See [`deploy/container/`](https://github.com/adamcavendish/kanidm-dashboard/tree/main/deploy/container)
-for the Docker setup.
-
 ## Configuring the dashboard
 
-Place a `dashboard.config.json` at the web root. The dashboard loads it on
-first access. See [Configuration](configuration.md) for details.
+Place a `dashboard.config.json` at the web root (next to `index.html`).
+The container image includes a default config. See
+[Configuration](configuration.md) for all options.
+
+To use a custom config with the container:
+
+```yaml
+volumes:
+  - ./my-dashboard.config.json:/config/dashboard.config.json:ro
+```
 
 ## CI/CD
 
-See `.github/workflows/` for the CI pipeline and container image publishing
-workflows. The CI runs:
-
-1. Fast gate — type-check, lint, unit tests, build, artifact audit, container
-   smoke test.
-2. Real Kanidm integration — end-to-end tests against a live Kanidm instance.
-
-Container images are published to `ghcr.io` on tag pushes (`v*`).
+Container images are published to `ghcr.io/adamcavendish/kanidm-dashboard`
+on every semver tag (`[0-9]*`). See `.github/workflows/container-image.yml`.
