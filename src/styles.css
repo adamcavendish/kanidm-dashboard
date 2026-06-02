@@ -475,6 +475,19 @@ code {
   align-items: center;
 }
 
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.edit-toolbar {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 .field-grid {
   display: grid;
   gap: 12px;
@@ -650,6 +663,12 @@ td small,
 
 .glass-panel {
   padding: 16px;
+}
+
+.resource-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .glass-panel h2,
@@ -1121,6 +1140,17 @@ td small {
 .option-card.selected {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.member-pill.inherited {
+  border-color: color-mix(in srgb, var(--muted) 40%, var(--line));
+  background: color-mix(in srgb, var(--muted) 6%, var(--panel));
+}
+
+.member-kind {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-left: auto;
 }
 
 .review-box {

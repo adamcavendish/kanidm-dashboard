@@ -156,6 +156,14 @@ interface ConsoleContextValue {
   cancelCredentialUpdate: (sessionToken: string) => Promise<void>;
   addPerson: (input: NewPersonInput) => Promise<PersonCreationResult>;
   addGroup: (input: NewGroupInput) => Promise<GroupCreationResult>;
+  deleteGroup: (groupId: string, groupName: string) => Promise<void>;
+  updateGroup: (
+    groupId: string,
+    groupName: string,
+    patch: Partial<Pick<Group, "displayName" | "description" | "managedBy">>,
+  ) => Promise<void>;
+  addGroupMembers: (name: string, members: string[]) => Promise<void>;
+  removeGroupMembers: (name: string, members: string[]) => Promise<void>;
   addApplication: (input: NewApplicationInput) => Promise<Application>;
   toggleGroupMember: (groupId: string, personId: string) => Promise<void>;
   uploadDomainImage: (file: File) => Promise<void>;
@@ -1329,6 +1337,92 @@ export function ConsoleProvider(props: ParentProps) {
     return { group, metadataWarnings: [] };
   };
 
+  const deleteGroup = async (groupId: string, groupName: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm group.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteGroup(groupName),
+      );
+      return;
+    }
+    setState((previous) => ({
+      ...previous,
+      groups: previous.groups.filter((g) => g.id !== groupId),
+    }));
+  };
+
+  const updateGroup = async (
+    groupId: string,
+    groupName: string,
+    patch: Partial<Pick<Group, "displayName" | "description" | "managedBy">>,
+  ) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm group.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateGroup(groupName, patch),
+      );
+      return;
+    }
+    setState((previous) => ({
+      ...previous,
+      groups: previous.groups.map((g) => (g.id === groupId ? { ...g, ...patch } : g)),
+    }));
+  };
+
+  const addGroupMembers = async (name: string, members: string[]) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Adding Kanidm group members.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).addGroupMembers(name, members),
+      );
+      return;
+    }
+    setState((previous) => {
+      const group = previous.groups.find((g) => g.name === name);
+      if (!group) return previous;
+      return {
+        ...previous,
+        groups: previous.groups.map((g) =>
+          g.name === name ? { ...g, members: [...new Set([...g.members, ...members])] } : g,
+        ),
+        people: previous.people.map((p) =>
+          members.includes(p.id) ? { ...p, groups: [...new Set([...p.groups, group.id])] } : p,
+        ),
+      };
+    });
+  };
+
+  const removeGroupMembers = async (name: string, members: string[]) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Removing Kanidm group members.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).removeGroupMembers(name, members),
+      );
+      return;
+    }
+    setState((previous) => {
+      const group = previous.groups.find((g) => g.name === name);
+      if (!group) return previous;
+      return {
+        ...previous,
+        groups: previous.groups.map((g) =>
+          g.name === name ? { ...g, members: g.members.filter((m) => !members.includes(m)) } : g,
+        ),
+        people: previous.people.map((p) =>
+          members.includes(p.id) ? { ...p, groups: p.groups.filter((gid) => gid !== group.id) } : p,
+        ),
+      };
+    });
+  };
+
   const addApplication = async (input: NewApplicationInput) => {
     if (config().dataSource.mode === "kanidm") {
       const appName = input.name.trim();
@@ -1655,6 +1749,10 @@ export function ConsoleProvider(props: ParentProps) {
     cancelCredentialUpdate,
     addPerson,
     addGroup,
+    deleteGroup,
+    updateGroup,
+    addGroupMembers,
+    removeGroupMembers,
     addApplication,
     toggleGroupMember,
     uploadDomainImage,

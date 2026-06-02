@@ -45,6 +45,11 @@ export interface DashboardDataSource {
   createPerson(input: NewPersonInput): Promise<PersonCreationResult>;
   updatePersonProfile(id: string, input: ProfileUpdateInput): Promise<void>;
   createGroup(input: NewGroupInput): Promise<Pick<GroupCreationResult, "metadataWarnings">>;
+  deleteGroup(id: string): Promise<void>;
+  updateGroup(
+    id: string,
+    patch: Partial<Pick<Group, "displayName" | "description" | "managedBy">>,
+  ): Promise<void>;
   addGroupMembers(name: string, members: string[]): Promise<void>;
   removeGroupMembers(name: string, members: string[]): Promise<void>;
   createOAuth2Application(input: NewApplicationInput): Promise<{ clientSecret?: string }>;
@@ -193,6 +198,29 @@ export class KanidmDataSource implements DashboardDataSource {
 
   async createGroup(input: NewGroupInput): Promise<Pick<GroupCreationResult, "metadataWarnings">> {
     return createGroup(this.config, input);
+  }
+
+  async deleteGroup(id: string): Promise<void> {
+    await new GroupApi(this.config).groupIdDelete({ id });
+  }
+
+  async updateGroup(
+    id: string,
+    patch: Partial<Pick<Group, "displayName" | "description" | "managedBy">>,
+  ): Promise<void> {
+    const attrApi = new GroupAttrApi(this.config);
+    const updates: Promise<unknown>[] = [];
+    if (patch.displayName !== undefined) {
+      updates.push(attrApi.groupIdAttrPut({ id, attr: "displayname", body: [patch.displayName] }));
+    }
+    if (patch.description !== undefined) {
+      updates.push(attrApi.groupIdAttrPut({ id, attr: "description", body: [patch.description] }));
+    }
+    if (patch.managedBy !== undefined) {
+      const body = patch.managedBy ? [patch.managedBy] : [];
+      updates.push(attrApi.groupIdAttrPut({ id, attr: "entry_managed_by", body }));
+    }
+    await Promise.all(updates);
   }
 
   async addGroupMembers(name: string, members: string[]): Promise<void> {
@@ -509,6 +537,20 @@ export class MockDataSource implements DashboardDataSource {
     };
     this.persist();
     return { metadataWarnings: [] };
+  }
+  async deleteGroup(id: string): Promise<void> {
+    this.state = { ...this.state, groups: this.state.groups.filter((g) => g.id !== id) };
+    this.persist();
+  }
+  async updateGroup(
+    id: string,
+    patch: Partial<Pick<Group, "displayName" | "description">>,
+  ): Promise<void> {
+    this.state = {
+      ...this.state,
+      groups: this.state.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+    };
+    this.persist();
   }
   async addGroupMembers(name: string, members: string[]): Promise<void> {
     const group = this.state.groups.find((g) => g.name === name);
