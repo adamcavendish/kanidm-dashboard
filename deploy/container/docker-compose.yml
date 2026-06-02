@@ -10,6 +10,10 @@
 # Usage:
 #   docker compose -f docker-compose.yml up -d
 #
+# Image tags:
+#   :latest  — always pulls the newest release (auto-update on restart)
+#   :0.0.2   — pin to a specific version (recommended for production)
+#
 # TLS notes:
 #   The dashboard uses Caddy's system trust store for HTTPS connections
 #   to Kanidm. If Kanidm uses a self-signed certificate, mount a custom
@@ -34,7 +38,8 @@ services:
       - kanidm
 
   dashboard:
-    image: ghcr.io/adamcavendish/kanidm-dashboard:0.0.2
+    # Change :latest to a version tag (e.g. :0.0.2) to pin for production
+    image: ghcr.io/adamcavendish/kanidm-dashboard:latest
     container_name: kanidm-dashboard
     restart: unless-stopped
     environment:
