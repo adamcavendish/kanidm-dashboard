@@ -2,6 +2,8 @@ name: Container Image
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "[0-9]*"
   workflow_dispatch:
@@ -60,6 +62,8 @@ jobs:
             tag="${INPUT_IMAGE_TAG}"
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME}"
+          elif [ "${GITHUB_REF_NAME}" = "main" ]; then
+            tag="latest"
           else
             tag="sha-${GITHUB_SHA::12}"
           fi
@@ -88,7 +92,9 @@ jobs:
           context: .
           file: deploy/container/Dockerfile
           push: true
-          tags: ${{ steps.image.outputs.ref }}
+          tags: |
+            ${{ steps.image.outputs.ref }}
+            ghcr.io/${{ github.repository }}:latest
 
       - name: Pull and smoke published image
         env:
