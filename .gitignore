@@ -9,3 +9,4 @@ deploy/local/kanidm/mail-sender.local.toml
 deploy/local/mailpit/tls/
 src/generated/kanidm-sdk/
 docs/book/
+.vite/

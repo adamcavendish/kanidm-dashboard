@@ -14,7 +14,7 @@ if (!image) {
 }
 
 await runContainerSmoke({
-  composeFile: join(rootDir, "deploy/container/docker-compose.image-smoke.yml"),
+  composeFile: join(rootDir, "scripts/smoke/docker-compose.image-smoke.yml"),
   projectNamePrefix: "kanidm-dashboard-registry-smoke",
   image,
   pullImage: true,

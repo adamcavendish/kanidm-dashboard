@@ -25,11 +25,7 @@
 
 	@kanidm path /ui* /v1* /oauth2* /pkg* /hpkg* /.well-known* /docs* /status
 	handle @kanidm {
-		reverse_proxy {$KANIDM_UPSTREAM:https://kanidm:8443} {
-			transport http {
-				tls_insecure_skip_verify
-			}
-		}
+		reverse_proxy {$KANIDM_UPSTREAM:https://kanidm:8443}
 	}
 
 	handle {

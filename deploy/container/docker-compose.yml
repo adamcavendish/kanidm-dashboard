@@ -1,0 +1,50 @@
+# Example: deploy kanidm-dashboard alongside a Kanidm server.
+#
+# The dashboard container proxies Kanidm API routes internally and serves
+# the admin UI + self-service portal. Only port 8080 needs to be exposed
+# to your reverse proxy (Caddy, nginx, etc.).
+#
+# Prerequisites:
+#   - A running Kanidm server (e.g. kanidm/server:1.10.3)
+#
+# Usage:
+#   docker compose -f docker-compose.yml up -d
+#
+# TLS notes:
+#   The dashboard uses Caddy's system trust store for HTTPS connections
+#   to Kanidm. If Kanidm uses a self-signed certificate, mount a custom
+#   Caddyfile with tls_trusted_ca_certs or tls_insecure_skip_verify:
+#
+#     volumes:
+#       - ./my-caddyfile:/etc/caddy/Caddyfile:ro
+
+services:
+  kanidm:
+    image: kanidm/server:1.10.3
+    container_name: kanidm
+    restart: unless-stopped
+    volumes:
+      - ./server.toml:/data/server.toml:ro
+      - ./db:/data/db
+      - ./certs:/data/certs:ro
+      - ./backups:/data/backups
+    ports:
+      - "127.0.0.1:8443:8443"
+    networks:
+      - kanidm
+
+  dashboard:
+    image: ghcr.io/adamcavendish/kanidm-dashboard:0.0.2
+    container_name: kanidm-dashboard
+    restart: unless-stopped
+    environment:
+      # Kanidm upstream URL (must be reachable from the dashboard container)
+      KANIDM_UPSTREAM: https://kanidm:8443
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - kanidm
+
+networks:
+  kanidm:
+    driver: bridge
