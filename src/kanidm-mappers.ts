@@ -502,6 +502,15 @@ function mapGroups(
           ),
       )
       .map((candidate) => candidate.id),
+    managedBy:
+      mapped.find(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          refsIntersect(
+            values(groupEntries[index], "entry_managed_by"),
+            entryRefs(groupEntries[candidateIndex], candidate.name, candidate.id),
+          ),
+      )?.id ?? group.managedBy,
   }));
   const seen = new Set(normalized.flatMap((group) => [group.id, group.name, group.displayName]));
 
