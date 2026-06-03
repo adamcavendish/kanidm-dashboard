@@ -1,15 +1,5 @@
-import {
-  createContext,
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-  useContext,
-} from "solid-js";
-import type { JSX, ParentProps } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
+import type { ParentProps } from "solid-js";
 import {
   AppWindow,
   ArrowRight,
@@ -33,7 +23,6 @@ import {
   QrCode,
   RefreshCw,
   RotateCcw,
-  Search,
   ServerCog,
   ShieldCheck,
   Smartphone,
@@ -49,6 +38,7 @@ import type {
   ApplicationPatch,
   ApplicationScopeMap,
   BrandingSettings,
+  CreatedApplication,
   CredentialUpdateIntent,
   CredentialUpdateStatus,
   Group,
@@ -88,27 +78,24 @@ import TextField from "./components/text-field";
 import KeyValue from "./components/key-value";
 import ReviewPanel from "./components/review-panel";
 import AppIcon from "./components/app-icon";
-
-const standardScopes = ["openid", "profile", "email", "groups", "ssh_publickey"];
-const scopeDetails: Record<string, string> = {
-  openid: "Required for OIDC",
-  profile: "User profile claim",
-  email: "Email claim",
-  groups: "Group claim",
-  ssh_publickey: "SSH key claim",
-};
+import { AuthFrame } from "./components/auth-frame";
+import { CredentialCard } from "./components/credential-card";
+import { CredentialMeter } from "./components/credential-meter";
+import { CredentialUpdateStatusPanel } from "./components/credential-update-status-panel";
+import { EmptyState } from "./components/empty-state";
+import { LogoMark } from "./components/logo-mark";
+import { NodeCard } from "./components/node-card";
+import { StatCard } from "./components/stat-card";
+import { AppStatusBadge, StatusBadge } from "./components/status-badge";
+import { Toolbar } from "./components/toolbar";
+import { TotpRegistrationPanel, totpIssueText } from "./components/totp-registration-panel";
+import { isPublicRoute } from "./route-paths";
+import { scopeDetails, standardScopes } from "./oauth-scopes";
+import { Link, NavLink, NavigationProvider, useNavigation } from "./routing";
 
 const returnAfterLoginKey = "kanidm-dashboard-return-after-login";
 
 type LoginMethod = "password" | "totp" | "backup" | "passkey" | "security-key";
-type CreatedApplication = Application & { clientSecret?: string };
-
-interface RouteContextValue {
-  path: () => string;
-  navigate: (to: string) => void;
-}
-
-const RouteContext = createContext<RouteContextValue>();
 
 function App() {
   return (
@@ -118,28 +105,6 @@ function App() {
       </NavigationProvider>
     </ConsoleProvider>
   );
-}
-
-function NavigationProvider(props: ParentProps) {
-  const [path, setPath] = createSignal(window.location.pathname || "/portal");
-  const navigate = (to: string) => {
-    if (to === path()) return;
-    window.history.pushState({}, "", to);
-    setPath(to);
-    window.scrollTo({ top: 0, behavior: "auto" });
-  };
-  const onPopState = () => setPath(window.location.pathname || "/portal");
-
-  onMount(() => window.addEventListener("popstate", onPopState));
-  onCleanup(() => window.removeEventListener("popstate", onPopState));
-
-  return <RouteContext.Provider value={{ path, navigate }}>{props.children}</RouteContext.Provider>;
-}
-
-function useNavigation() {
-  const context = useContext(RouteContext);
-  if (!context) throw new Error("useNavigation must be used inside NavigationProvider");
-  return context;
 }
 
 function AppRoutes() {
@@ -225,18 +190,6 @@ function SwitchPrivate() {
   });
 
   return <>{route()}</>;
-}
-
-function isPublicRoute(path: string) {
-  return [
-    "/login",
-    "/oauth/consent",
-    "/oauth/resume",
-    "/oauth/access-denied",
-    "/recover",
-    "/reset",
-    "/logout",
-  ].includes(path);
 }
 
 function Shell(props: ParentProps) {
@@ -328,65 +281,6 @@ function AdminRail() {
         <Brush size={17} /> Branding
       </NavLink>
     </aside>
-  );
-}
-
-function Link(
-  props: ParentProps<{
-    href: string;
-    class?: string;
-    ariaLabel?: string;
-    target?: string;
-    rel?: string;
-  }>,
-) {
-  const { navigate } = useNavigation();
-  const external = () => props.href.startsWith("http") || props.target;
-  return (
-    <a
-      href={props.href}
-      class={props.class}
-      aria-label={props.ariaLabel}
-      target={props.target}
-      rel={props.rel}
-      onClick={(event) => {
-        if (external()) return;
-        event.preventDefault();
-        navigate(props.href);
-      }}
-    >
-      {props.children}
-    </a>
-  );
-}
-
-function NavLink(props: ParentProps<{ href: string }>) {
-  const { path } = useNavigation();
-  const active = () =>
-    props.href === "/admin"
-      ? path() === "/admin" || path().startsWith("/admin/")
-      : path() === props.href;
-  return (
-    <Link href={props.href} class={active() ? "active" : ""}>
-      {props.children}
-    </Link>
-  );
-}
-
-function LogoMark(props: { small?: boolean }) {
-  const { branding } = useConsole();
-  const className = () => (props.small ? "logo-mark logo-mark-small" : "logo-mark");
-  return (
-    <Show
-      when={branding().logoUrl}
-      fallback={
-        <span class={className()} aria-hidden="true">
-          {branding().companyName.slice(0, 1).toUpperCase()}
-        </span>
-      }
-    >
-      {(logoUrl) => <img class={className()} src={logoUrl()} alt="" />}
-    </Show>
   );
 }
 
@@ -607,15 +501,6 @@ function returnAfterLoginPath() {
     return "/portal";
   }
   return stored;
-}
-
-function AuthFrame(props: ParentProps) {
-  return (
-    <main class="auth-frame">
-      <div class="orb-grid" />
-      {props.children}
-    </main>
-  );
 }
 
 function OAuthConsentPage() {
@@ -1879,96 +1764,6 @@ function arrayBufferToBase64Url(buffer: ArrayBuffer) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
-}
-
-function CredentialUpdateStatusPanel(props: { status: CredentialUpdateStatus }) {
-  const rows = () => [
-    [
-      "Primary",
-      props.status.primaryState,
-      props.status.hasPrimaryCredential ? "Present" : "Missing",
-    ],
-    ["Passkeys", props.status.passkeysState, `${props.status.passkeyCount} registered`],
-    [
-      "TOTP",
-      props.status.pendingTotp ? "Pending verification" : "Ready",
-      props.status.totpLabels.length
-        ? `${props.status.totpLabels.length} registered`
-        : "No registered TOTP",
-    ],
-    [
-      "Attested passkeys",
-      props.status.attestedPasskeysState,
-      `${props.status.attestedPasskeyCount} registered`,
-    ],
-    [
-      "Unix credential",
-      props.status.unixCredentialState,
-      props.status.hasUnixCredential ? "Present" : "Missing",
-    ],
-    [
-      "Backup codes",
-      props.status.pendingBackupCodes.length ? "Generated" : "No staged changes",
-      props.status.pendingBackupCodes.length
-        ? `${props.status.pendingBackupCodes.length} pending codes`
-        : "Use generation controls below",
-    ],
-    ["SSH public keys", props.status.sshKeysState, `${props.status.sshKeyCount} keys`],
-  ];
-
-  return (
-    <div class="intent-token">
-      <KeyValue label="Account" value={props.status.displayName} />
-      <KeyValue label="SPN" value={props.status.spn} />
-      <KeyValue label="Commit allowed" value={props.status.canCommit ? "Yes" : "No"} />
-      <Show when={props.status.warnings.length}>
-        <div class="review-box danger">
-          <CircleAlert size={18} />
-          <span>{props.status.warnings.join(", ")}</span>
-        </div>
-      </Show>
-      <div class="status-list">
-        <For each={rows()}>
-          {([label, state, detail]) => (
-            <div>
-              <span>{label}</span>
-              <strong>{state}</strong>
-              <small>{detail}</small>
-            </div>
-          )}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function TotpRegistrationPanel(props: {
-  registration: NonNullable<CredentialUpdateStatus["pendingTotp"]>;
-}) {
-  return (
-    <div class="totp-registration" aria-label="TOTP registration details">
-      <KeyValue label="Issuer" value={props.registration.issuer} />
-      <KeyValue label="Account" value={props.registration.accountName} />
-      <KeyValue label="Secret" value={props.registration.secret} />
-      <KeyValue label="Algorithm" value={props.registration.algorithm} />
-      <KeyValue label="Digits" value={props.registration.digits} />
-      <KeyValue label="Period" value={`${props.registration.step}s`} />
-      <code>{props.registration.uri}</code>
-    </div>
-  );
-}
-
-function totpIssueText(status: CredentialUpdateStatus) {
-  if (status.totpIssue === "try-again") return "The TOTP code did not verify.";
-  if (status.totpIssue === "name-taken") {
-    return status.totpIssueLabel
-      ? `A TOTP named ${status.totpIssueLabel} already exists.`
-      : "That TOTP name already exists.";
-  }
-  if (status.totpIssue === "invalid-sha1") {
-    return "The authenticator proposed SHA1. Accept only for compatibility with an existing app.";
-  }
-  return "";
 }
 
 function LogoutPage() {
@@ -5077,106 +4872,6 @@ function CreatedApplicationSummary(props: { app: CreatedApplication }) {
   );
 }
 
-function StatCard(props: {
-  icon: JSX.Element;
-  label: string;
-  value: JSX.Element | number | string;
-  detail: string;
-}) {
-  return (
-    <div class="stat-card">
-      <span>{props.icon}</span>
-      <small>{props.label}</small>
-      <strong>{props.value}</strong>
-      <em>{props.detail}</em>
-    </div>
-  );
-}
-
-function Toolbar(props: { query: string; onQuery: (value: string) => void; placeholder: string }) {
-  return (
-    <div class="toolbar">
-      <Search size={17} />
-      <input
-        aria-label={props.placeholder}
-        value={props.query}
-        onInput={(event) => props.onQuery(event.currentTarget.value)}
-        placeholder={props.placeholder}
-      />
-    </div>
-  );
-}
-
-function EmptyState(props: { icon: JSX.Element; title: string; text: string }) {
-  return (
-    <div class="empty-state">
-      {props.icon}
-      <h2>{props.title}</h2>
-      <p>{props.text}</p>
-    </div>
-  );
-}
-
-function StatusBadge(props: { status: UserStatus }) {
-  return <span class={`status-badge ${props.status}`}>{props.status}</span>;
-}
-
-function AppStatusBadge(props: { status: Application["status"] }) {
-  return <span class={`status-badge ${props.status}`}>{props.status}</span>;
-}
-
-function CredentialMeter(props: { person: Person; compact?: boolean }) {
-  const checks = () => [
-    props.person.credential.password === "healthy",
-    props.person.credential.passkeys > 0,
-    props.person.credential.totp,
-    props.person.credential.backupCodes > 0,
-    props.person.credential.sshKeys > 0,
-  ];
-  const score = () => checks().filter(Boolean).length;
-  return (
-    <div class={props.compact ? "credential-meter compact" : "credential-meter"}>
-      <span style={{ width: `${(score() / checks().length) * 100}%` }} />
-      <Show when={!props.compact}>
-        <small>
-          {score()}/{checks().length} healthy signals
-        </small>
-      </Show>
-    </div>
-  );
-}
-
-function CredentialCard(props: {
-  title: string;
-  value: string;
-  icon: JSX.Element;
-  action: string;
-  href?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div class="credential-card">
-      <span>{props.icon}</span>
-      <h3>{props.title}</h3>
-      <p>{props.value}</p>
-      <Show
-        when={props.href && !props.disabled ? props.href : undefined}
-        fallback={
-          <button class="secondary-action" type="button" disabled={props.disabled}>
-            {props.action}
-          </button>
-        }
-      >
-        {(href) => (
-          <Link class="secondary-action" href={href()}>
-            {props.action}
-          </Link>
-        )}
-      </Show>
-    </div>
-  );
-}
-
 interface OAuthDisplayRequest {
   app: Application;
   clientId: string;
@@ -5272,18 +4967,6 @@ function appendOauthResult(target: string, values: Record<string, string>) {
     if (value) url.searchParams.set(key, value);
   }
   return url.href;
-}
-
-function NodeCard(props: { icon: JSX.Element; title: string; subtitle: string }) {
-  return (
-    <div class="node-card">
-      {props.icon}
-      <span>
-        <strong>{props.title}</strong>
-        <small>{props.subtitle}</small>
-      </span>
-    </div>
-  );
 }
 
 function methodLabel(method: string) {
