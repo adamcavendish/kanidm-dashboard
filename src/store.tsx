@@ -27,7 +27,9 @@ import type {
   PasskeyLoginChallenge,
   PasskeyRegistration,
   Person,
+  PersonCertificate,
   PersonCreationResult,
+  PersonStatusPatch,
   ProfileUpdateInput,
   Role,
   SshPublicKey,
@@ -95,14 +97,30 @@ interface ConsoleContextValue {
   updateNativeBranding: (patch: Partial<Omit<BrandingSettings, "theme">>) => Promise<void>;
   resetNativeBranding: () => void;
   updateProfile: (input: ProfileUpdateInput) => Promise<void>;
+  updatePersonProfile: (personId: string, input: ProfileUpdateInput) => Promise<void>;
+  updatePersonStatus: (personId: string, patch: PersonStatusPatch) => Promise<void>;
+  deletePerson: (personId: string) => Promise<void>;
+  getPersonCertificates: (personId: string) => Promise<PersonCertificate[]>;
+  addPersonCertificate: (personId: string, certificate: string) => Promise<PersonCertificate[]>;
   getRadiusPassword: () => Promise<string | null>;
   generateRadiusPassword: () => Promise<string | null>;
   deleteRadiusPassword: () => Promise<void>;
+  getPersonRadiusPassword: (personId: string) => Promise<string | null>;
+  generatePersonRadiusPassword: (personId: string) => Promise<string | null>;
+  deletePersonRadiusPassword: (personId: string) => Promise<void>;
   getSshPublicKeys: () => Promise<SshPublicKey[]>;
   addSshPublicKey: (tag: string, key: string) => Promise<SshPublicKey[]>;
   deleteSshPublicKey: (tag: string) => Promise<SshPublicKey[]>;
+  getPersonSshPublicKeys: (personId: string) => Promise<SshPublicKey[]>;
+  addPersonSshPublicKey: (personId: string, tag: string, key: string) => Promise<SshPublicKey[]>;
+  deletePersonSshPublicKey: (personId: string, tag: string) => Promise<SshPublicKey[]>;
   getUserAuthTokens: () => Promise<UserAuthTokenStatus[]>;
   deleteUserAuthToken: (sessionId: string) => Promise<UserAuthTokenStatus[]>;
+  getPersonUserAuthTokens: (personId: string) => Promise<UserAuthTokenStatus[]>;
+  deletePersonUserAuthToken: (
+    personId: string,
+    sessionId: string,
+  ) => Promise<UserAuthTokenStatus[]>;
   issueCredentialUpdateIntent: (
     personId: string,
     ttlSeconds: number,
@@ -113,6 +131,12 @@ interface ConsoleContextValue {
   ) => Promise<UnixAccountSettings>;
   setUnixCredential: (password: string) => Promise<UnixAccountSettings>;
   deleteUnixCredential: () => Promise<UnixAccountSettings>;
+  extendPersonUnixAccount: (
+    personId: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ) => Promise<UnixAccountSettings>;
+  setPersonUnixCredential: (personId: string, password: string) => Promise<UnixAccountSettings>;
+  deletePersonUnixCredential: (personId: string) => Promise<UnixAccountSettings>;
   exchangeCredentialUpdateIntent: (intentToken: string) => Promise<CredentialUpdateStatus>;
   updateCredentialPassword: (
     sessionToken: string,
@@ -194,6 +218,9 @@ export function ConsoleProvider(props: ParentProps) {
   );
   let mockRadiusPasswords = seedMockRadiusPasswords();
   const [mockSshPublicKeys, setMockSshPublicKeys] = createSignal(seedMockSshPublicKeys());
+  const [mockPersonCertificates, setMockPersonCertificates] = createSignal<
+    Record<string, PersonCertificate[]>
+  >({});
   const [mockUserAuthTokens, setMockUserAuthTokens] = createSignal(seedMockUserAuthTokens());
   const [config, setConfig] = createSignal<DashboardConfig>(defaultDashboardConfig);
   const [configReady, setConfigReady] = createSignal(false);
@@ -238,6 +265,12 @@ export function ConsoleProvider(props: ParentProps) {
       current.people.find((person) => person.id === current.currentUserId) ?? current.people[0]
     );
   });
+
+  const personForId = (personId: string) =>
+    state().people.find((person) => person.id === personId) ??
+    state().people.find((person) => person.username === personId);
+
+  const kanidmPersonId = (personId: string) => personForId(personId)?.username ?? personId;
 
   async function bootstrapConfigAndData() {
     const loadedConfig = await loadDashboardConfig();
@@ -546,15 +579,13 @@ export function ConsoleProvider(props: ParentProps) {
     }));
   };
 
-  const updateProfile = async (input: ProfileUpdateInput) => {
-    const current = currentUser();
-
+  const updatePersonProfile = async (personId: string, input: ProfileUpdateInput) => {
     if (config().dataSource.mode === "kanidm") {
       await mutateKanidm("Updating Kanidm profile attributes.", () =>
         new KanidmDataSource(
           config().dataSource,
           sessionStorage.getItem(bearerTokenKey) ?? undefined,
-        ).updatePersonProfile(current.id, input),
+        ).updatePersonProfile(kanidmPersonId(personId), input),
       );
       return;
     }
@@ -562,13 +593,170 @@ export function ConsoleProvider(props: ParentProps) {
     setState((previous) => ({
       ...previous,
       people: previous.people.map((person) =>
-        person.id === current.id
+        person.id === personId
           ? {
               ...person,
               displayName: input.displayName.trim(),
               legalName: input.legalName.trim(),
               email: input.email.trim(),
             }
+          : person,
+      ),
+    }));
+  };
+
+  const updateProfile = async (input: ProfileUpdateInput) =>
+    updatePersonProfile(currentUser().id, input);
+
+  const updatePersonStatus = async (personId: string, patch: PersonStatusPatch) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm person status.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updatePersonStatus(kanidmPersonId(personId), patch),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      people: previous.people.map((person) =>
+        person.id === personId
+          ? {
+              ...person,
+              status: patch.status,
+              ...(patch.validFrom !== undefined ? { validFrom: patch.validFrom } : {}),
+              ...(patch.expireAt !== undefined ? { expireAt: patch.expireAt } : {}),
+              ...(patch.softLockExpire !== undefined
+                ? { softLockExpire: patch.softLockExpire }
+                : {}),
+            }
+          : person,
+      ),
+    }));
+  };
+
+  const deletePerson = async (personId: string) => {
+    const person = personForId(personId);
+    if (!person) throw new Error("Person was not found.");
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm person.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deletePerson(person.username),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      people: previous.people.filter((candidate) => candidate.id !== personId),
+      groups: previous.groups.map((group) => ({
+        ...group,
+        members: group.members.filter((memberId) => memberId !== personId),
+      })),
+    }));
+  };
+
+  const getPersonCertificates = async (personId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm person certificates.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).personCertificates(kanidmPersonId(personId)),
+        { reportError: false },
+      );
+    }
+
+    return mockPersonCertificates()[personId] ?? [];
+  };
+
+  const addPersonCertificate = async (personId: string, certificate: string) => {
+    const trimmed = certificate.trim();
+    if (!trimmed) throw new Error("Certificate is required.");
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Adding Kanidm person certificate.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).addPersonCertificate(kanidmPersonId(personId), trimmed),
+      );
+      return getPersonCertificates(personId);
+    }
+
+    const nextCertificate: PersonCertificate = {
+      id: `mock-cert-${Date.now()}`,
+      label: `Certificate ${(mockPersonCertificates()[personId] ?? []).length + 1}`,
+      pem: trimmed,
+    };
+    const next = [...(mockPersonCertificates()[personId] ?? []), nextCertificate];
+    setMockPersonCertificates((previous) => ({ ...previous, [personId]: next }));
+    return next;
+  };
+
+  const getPersonRadiusPassword = async (personId: string) => {
+    if (config().dataSource.mode !== "kanidm") {
+      const person = personForId(personId);
+      if (!person?.credential.radiusPassword) return null;
+      return mockRadiusPasswords[personId] ?? seedRadiusPassword;
+    }
+    return readKanidm(
+      "Reading Kanidm RADIUS password.",
+      () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).radiusPassword(kanidmPersonId(personId)),
+      { reportError: false },
+    );
+  };
+
+  const generatePersonRadiusPassword = async (personId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      const { result } = await mutateKanidm("Generating Kanidm RADIUS password.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).generateRadiusPassword(kanidmPersonId(personId)),
+      );
+      return result;
+    }
+
+    const generated = `rad-demo-${Math.random().toString(36).slice(2, 10)}`;
+    mockRadiusPasswords[personId] = generated;
+    setState((previous) => ({
+      ...previous,
+      people: previous.people.map((person) =>
+        person.id === personId
+          ? { ...person, credential: { ...person.credential, radiusPassword: true } }
+          : person,
+      ),
+    }));
+    return generated;
+  };
+
+  const deletePersonRadiusPassword = async (personId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm RADIUS password.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteRadiusPassword(kanidmPersonId(personId)),
+      );
+      return;
+    }
+
+    delete mockRadiusPasswords[personId];
+    setState((previous) => ({
+      ...previous,
+      people: previous.people.map((person) =>
+        person.id === personId
+          ? { ...person, credential: { ...person.credential, radiusPassword: false } }
           : person,
       ),
     }));
@@ -746,6 +934,101 @@ export function ConsoleProvider(props: ParentProps) {
     return getUserAuthTokens();
   };
 
+  const getPersonSshPublicKeys = async (personId: string) => {
+    if (config().dataSource.mode !== "kanidm") {
+      return mockSshPublicKeys()[personId] ?? [];
+    }
+
+    return readKanidm(
+      "Reading Kanidm SSH public keys.",
+      () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).sshPublicKeys(kanidmPersonId(personId)),
+      { reportError: false },
+    );
+  };
+
+  const addPersonSshPublicKey = async (personId: string, tag: string, key: string) => {
+    const nextKey = { tag: tag.trim(), key: key.trim() };
+    if (!nextKey.tag || !nextKey.key) {
+      throw new Error("SSH key tag and public key are required.");
+    }
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Adding Kanidm SSH public key.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).addSshPublicKey(kanidmPersonId(personId), nextKey.tag, nextKey.key),
+      );
+      return getPersonSshPublicKeys(personId);
+    }
+
+    const nextKeys = [
+      ...(mockSshPublicKeys()[personId] ?? []).filter((item) => item.tag !== nextKey.tag),
+      nextKey,
+    ];
+    setMockSshPublicKeys((previous) => ({ ...previous, [personId]: nextKeys }));
+    setState((previous) => updateSshKeyCount(previous, personId, nextKeys.length));
+    return nextKeys;
+  };
+
+  const deletePersonSshPublicKey = async (personId: string, tag: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm SSH public key.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteSshPublicKey(kanidmPersonId(personId), tag),
+      );
+      return getPersonSshPublicKeys(personId);
+    }
+
+    const nextKeys = (mockSshPublicKeys()[personId] ?? []).filter((item) => item.tag !== tag);
+    setMockSshPublicKeys((previous) => ({ ...previous, [personId]: nextKeys }));
+    setState((previous) => updateSshKeyCount(previous, personId, nextKeys.length));
+    return nextKeys;
+  };
+
+  const getPersonUserAuthTokens = async (personId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm sessions.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).userAuthTokens(kanidmPersonId(personId)),
+        { reportError: false },
+      );
+    }
+
+    return mockUserAuthTokens().filter((session) => session.accountId === personId);
+  };
+
+  const deletePersonUserAuthToken = async (personId: string, sessionId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Revoking Kanidm user auth token.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteUserAuthToken(kanidmPersonId(personId), sessionId),
+      );
+      return getPersonUserAuthTokens(personId);
+    }
+
+    setMockUserAuthTokens((previous) =>
+      previous.map((session) =>
+        session.accountId === personId && session.sessionId === sessionId
+          ? { ...session, state: "revoked" }
+          : session,
+      ),
+    );
+    return getPersonUserAuthTokens(personId);
+  };
+
   const issueCredentialUpdateIntent = async (personId: string, ttlSeconds: number) => {
     const person = state().people.find((candidate) => candidate.id === personId);
     if (!person) throw new Error("Person was not found.");
@@ -755,7 +1038,7 @@ export function ConsoleProvider(props: ParentProps) {
         new KanidmDataSource(
           config().dataSource,
           sessionStorage.getItem(bearerTokenKey) ?? undefined,
-        ).credentialUpdateIntent(personId, ttlSeconds),
+        ).credentialUpdateIntent(kanidmPersonId(personId), ttlSeconds),
       );
       return result;
     }
@@ -827,6 +1110,74 @@ export function ConsoleProvider(props: ParentProps) {
 
     const nextUnix = { ...current.unix, credentialSet: false };
     setState((previous) => updateUnixAccount(previous, current.id, nextUnix));
+    return nextUnix;
+  };
+
+  const extendPersonUnixAccount = async (
+    personId: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ) => {
+    const person = personForId(personId);
+    if (!person) throw new Error("Person was not found.");
+    const nextUnix: UnixAccountSettings = {
+      gidNumber: input.gidNumber,
+      shell: input.shell.trim(),
+      credentialSet: person.unix.credentialSet,
+    };
+
+    if (config().dataSource.mode === "kanidm") {
+      const { loadedState } = await mutateKanidm("Updating Kanidm Unix account.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).extendUnixAccount(kanidmPersonId(personId), {
+          gidNumber: nextUnix.gidNumber,
+          shell: nextUnix.shell,
+        }),
+      );
+      return loadedState.people.find((candidate) => candidate.id === personId)?.unix ?? nextUnix;
+    }
+
+    setState((previous) => updateUnixAccount(previous, personId, nextUnix));
+    return nextUnix;
+  };
+
+  const setPersonUnixCredential = async (personId: string, password: string) => {
+    if (!password.trim()) throw new Error("Unix credential password is required.");
+    const person = personForId(personId);
+    if (!person) throw new Error("Person was not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      const { loadedState } = await mutateKanidm("Setting Kanidm Unix credential.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).setUnixCredential(kanidmPersonId(personId), password),
+      );
+      return loadedState.people.find((candidate) => candidate.id === personId)?.unix ?? person.unix;
+    }
+
+    const nextUnix = { ...person.unix, credentialSet: true };
+    setState((previous) => updateUnixAccount(previous, personId, nextUnix));
+    return nextUnix;
+  };
+
+  const deletePersonUnixCredential = async (personId: string) => {
+    const person = personForId(personId);
+    if (!person) throw new Error("Person was not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      const { loadedState } = await mutateKanidm("Deleting Kanidm Unix credential.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteUnixCredential(kanidmPersonId(personId)),
+      );
+      return loadedState.people.find((candidate) => candidate.id === personId)?.unix ?? person.unix;
+    }
+
+    const nextUnix = { ...person.unix, credentialSet: false };
+    setState((previous) => updateUnixAccount(previous, personId, nextUnix));
     return nextUnix;
   };
 
@@ -1719,7 +2070,11 @@ export function ConsoleProvider(props: ParentProps) {
     return true;
   }
 
-  async function readKanidm<T>(message: string, operation: (config: Configuration) => Promise<T>) {
+  async function readKanidm<T>(
+    message: string,
+    operation: (config: Configuration) => Promise<T>,
+    options: { reportError?: boolean } = {},
+  ) {
     const token = sessionStorage.getItem(bearerTokenKey);
     if (!token) {
       clearKanidmSession("Kanidm session expired. Sign in again.");
@@ -1735,7 +2090,7 @@ export function ConsoleProvider(props: ParentProps) {
       });
       return await operation(rConfig);
     } catch (error) {
-      if (!handleKanidmAuthFailure(error, token)) {
+      if (!handleKanidmAuthFailure(error, token) && options.reportError !== false) {
         setApiStatus({
           mode: "kanidm",
           state: "error",
@@ -1763,6 +2118,7 @@ export function ConsoleProvider(props: ParentProps) {
   const resetDemoData = () => {
     mockRadiusPasswords = seedMockRadiusPasswords();
     setMockSshPublicKeys(seedMockSshPublicKeys());
+    setMockPersonCertificates({});
     setMockUserAuthTokens(seedMockUserAuthTokens());
     setState({ ...initialState, branding: branding() });
   };
@@ -1787,19 +2143,35 @@ export function ConsoleProvider(props: ParentProps) {
     updateNativeBranding,
     resetNativeBranding,
     updateProfile,
+    updatePersonProfile,
+    updatePersonStatus,
+    deletePerson,
+    getPersonCertificates,
+    addPersonCertificate,
     getRadiusPassword,
     generateRadiusPassword,
     deleteRadiusPassword,
+    getPersonRadiusPassword,
+    generatePersonRadiusPassword,
+    deletePersonRadiusPassword,
     getSshPublicKeys,
     addSshPublicKey,
     deleteSshPublicKey,
+    getPersonSshPublicKeys,
+    addPersonSshPublicKey,
+    deletePersonSshPublicKey,
     getUserAuthTokens,
     deleteUserAuthToken,
+    getPersonUserAuthTokens,
+    deletePersonUserAuthToken,
     issueCredentialUpdateIntent,
     getUnixAccount,
     extendUnixAccount,
     setUnixCredential,
     deleteUnixCredential,
+    extendPersonUnixAccount,
+    setPersonUnixCredential,
+    deletePersonUnixCredential,
     exchangeCredentialUpdateIntent,
     updateCredentialPassword,
     generateCredentialBackupCodes,

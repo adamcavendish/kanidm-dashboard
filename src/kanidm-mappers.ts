@@ -10,6 +10,7 @@ import type {
   PasskeyCredential,
   PasskeyRegistration,
   Person,
+  PersonCertificate,
   TotpRegistration,
   UserAuthTokenStatus,
 } from "./domain";
@@ -86,6 +87,14 @@ export interface KanidmUserAuthTokenStatus {
   purpose?: string;
   expiry?: string;
   state?: "neverexpires" | "revoked" | { expiresat: string };
+}
+
+export function mapPersonCertificates(entry: KanidmEntry | null): PersonCertificate[] {
+  return values(entry ?? {}, "certificate").map((certificate, index) => ({
+    id: `cert-${index + 1}`,
+    label: `Certificate ${index + 1}`,
+    pem: certificate,
+  }));
 }
 
 export function personCreateEntry(input: NewPersonInput): KanidmEntry {
@@ -273,16 +282,19 @@ function mapPerson(entry: KanidmEntry, groups: Group[], groupEntries: KanidmEntr
     displayName: attr(entry, "displayname") || username,
     legalName: attr(entry, "legalname") || attr(entry, "displayname") || username,
     email: attr(entry, "mail") || `${username}@example.invalid`,
-    status: values(entry, "account_expire").length ? "expiring" : "active",
+    status: personStatus(entry),
+    validFrom: attr(entry, "accountvalidfrom") || undefined,
+    expireAt: attr(entry, "accountexpire") || undefined,
+    softLockExpire: attr(entry, "accountsoftlockexpire") || undefined,
     groups: groupIds,
     credential: {
       password: "healthy",
-      passkeys: values(entry, "passkeys").length,
-      totp: values(entry, "totp_import").length > 0,
+      passkeys: values(entry, "passkeys").length + values(entry, "attestedpasskeys").length,
+      totp: values(entry, "totpimport").length > 0,
       backupCodes: 0,
       unixCredential: unixCredentialSet,
-      sshKeys: values(entry, "ssh_publickey").length,
-      radiusPassword: false,
+      sshKeys: values(entry, "sshpublickey").length + values(entry, "ldapsshpublickey").length,
+      radiusPassword: values(entry, "radiussecret").length > 0,
     },
     unix: {
       gidNumber,
@@ -291,6 +303,16 @@ function mapPerson(entry: KanidmEntry, groups: Group[], groupEntries: KanidmEntr
     },
     lastAuth: attr(entry, "last_auth") || "Unknown",
   };
+}
+
+function personStatus(entry: KanidmEntry): Person["status"] {
+  if (values(entry, "nsaccountlock").some((value) => value === "true" || value === "1")) {
+    return "locked";
+  }
+  if (values(entry, "accountexpire").length || values(entry, "accountsoftlockexpire").length) {
+    return "expiring";
+  }
+  return "active";
 }
 
 function mergeCurrentPerson(person: Person, selfPerson: Person): Person {

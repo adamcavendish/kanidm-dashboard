@@ -161,7 +161,19 @@ export function ApplicationsPage() {
       </Show>
       <div class="split-admin">
         <div class="resource-list">
-          <For each={apps()}>
+          <For
+            each={apps()}
+            fallback={
+              <div class="resource-empty">
+                <strong>No applications found</strong>
+                <small>
+                  {query().trim()
+                    ? `No applications match "${query().trim()}".`
+                    : "No applications are available."}
+                </small>
+              </div>
+            }
+          >
             {(app) => (
               <button
                 class={app.id === selectedApp()?.id ? "resource-row active" : "resource-row"}
