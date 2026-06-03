@@ -11,6 +11,7 @@ import {
 import type {
   AccessPath,
   Application,
+  ApplicationPatch,
   BrandingSettings,
   ConsoleState,
   CredentialUpdateIntent,
@@ -73,7 +74,11 @@ interface ConsoleContextValue {
     username: string,
     password: string,
     privileged: boolean,
-    options?: { method?: "password" | "totp" | "backup"; totpCode?: string; backupCode?: string },
+    options?: {
+      method?: "password" | "totp" | "backup";
+      totpCode?: string;
+      backupCode?: string;
+    },
   ) => Promise<void>;
   startPasskeyLogin: (username: string, privileged: boolean) => Promise<PasskeyLoginChallenge>;
   finishPasskeyLogin: (challenge: PasskeyLoginChallenge, assertion: unknown) => Promise<void>;
@@ -165,6 +170,8 @@ interface ConsoleContextValue {
   addGroupMembers: (name: string, members: string[]) => Promise<void>;
   removeGroupMembers: (name: string, members: string[]) => Promise<void>;
   addApplication: (input: NewApplicationInput) => Promise<Application>;
+  updateApplication: (appId: string, patch: ApplicationPatch) => Promise<void>;
+  deleteApplication: (appId: string) => Promise<void>;
   toggleGroupMember: (groupId: string, personId: string) => Promise<void>;
   uploadDomainImage: (file: File) => Promise<void>;
   resetDomainImage: () => Promise<void>;
@@ -597,7 +604,10 @@ export function ConsoleProvider(props: ParentProps) {
       ...previous,
       people: previous.people.map((person) =>
         person.id === current.id
-          ? { ...person, credential: { ...person.credential, radiusPassword: true } }
+          ? {
+              ...person,
+              credential: { ...person.credential, radiusPassword: true },
+            }
           : person,
       ),
     }));
@@ -622,7 +632,10 @@ export function ConsoleProvider(props: ParentProps) {
       ...previous,
       people: previous.people.map((person) =>
         person.id === current.id
-          ? { ...person, credential: { ...person.credential, radiusPassword: false } }
+          ? {
+              ...person,
+              credential: { ...person.credential, radiusPassword: false },
+            }
           : person,
       ),
     }));
@@ -664,7 +677,10 @@ export function ConsoleProvider(props: ParentProps) {
       ...(mockSshPublicKeys()[current.id] ?? []).filter((item) => item.tag !== nextKey.tag),
       nextKey,
     ];
-    setMockSshPublicKeys((previous) => ({ ...previous, [current.id]: nextKeys }));
+    setMockSshPublicKeys((previous) => ({
+      ...previous,
+      [current.id]: nextKeys,
+    }));
     setState((previous) => updateSshKeyCount(previous, current.id, nextKeys.length));
     return nextKeys;
   };
@@ -683,7 +699,10 @@ export function ConsoleProvider(props: ParentProps) {
     }
 
     const nextKeys = (mockSshPublicKeys()[current.id] ?? []).filter((item) => item.tag !== tag);
-    setMockSshPublicKeys((previous) => ({ ...previous, [current.id]: nextKeys }));
+    setMockSshPublicKeys((previous) => ({
+      ...previous,
+      [current.id]: nextKeys,
+    }));
     setState((previous) => updateSshKeyCount(previous, current.id, nextKeys.length));
     return nextKeys;
   };
@@ -1299,7 +1318,10 @@ export function ConsoleProvider(props: ParentProps) {
           config().dataSource,
           sessionStorage.getItem(bearerTokenKey) ?? undefined,
         );
-        const createResult = await ds.createGroup({ ...input, managedBy: managedByName });
+        const createResult = await ds.createGroup({
+          ...input,
+          managedBy: managedByName,
+        });
         if (memberNames.length) await ds.addGroupMembers(groupName, memberNames);
         await Promise.all(
           parentGroupNames.map((parentGroupName) =>
@@ -1471,6 +1493,55 @@ export function ConsoleProvider(props: ParentProps) {
           ? `mock-secret-${Math.random().toString(36).slice(2, 12)}`
           : undefined,
     };
+  };
+
+  const updateApplication = async (appId: string, patch: ApplicationPatch) => {
+    const app = state().apps.find((candidate) => candidate.id === appId);
+    if (!app) throw new Error("Application not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm OAuth2 application.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateOAuth2Application(app.name, patch),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      apps: previous.apps.map((candidate) =>
+        candidate.id === appId
+          ? {
+              ...candidate,
+              ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+              ...(patch.landingUrl !== undefined ? { landingUrl: patch.landingUrl } : {}),
+              ...(patch.redirectUris !== undefined ? { redirectUris: patch.redirectUris } : {}),
+            }
+          : candidate,
+      ),
+    }));
+  };
+
+  const deleteApplication = async (appId: string) => {
+    const app = state().apps.find((candidate) => candidate.id === appId);
+    if (!app) throw new Error("Application not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm OAuth2 application.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteOAuth2Application(app.name),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      apps: previous.apps.filter((candidate) => candidate.id !== appId),
+    }));
   };
 
   const toggleGroupMember = async (groupId: string, personId: string) => {
@@ -1754,6 +1825,8 @@ export function ConsoleProvider(props: ParentProps) {
     addGroupMembers,
     removeGroupMembers,
     addApplication,
+    updateApplication,
+    deleteApplication,
     toggleGroupMember,
     uploadDomainImage,
     resetDomainImage,
@@ -2095,7 +2168,9 @@ function seedMockUserAuthTokens(): UserAuthTokenStatus[] {
       sessionId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       issuedAt: new Date(Date.now() - (index + 1) * 36e5).toISOString(),
       purpose: index === 0 ? "readwrite" : "readonly",
-      state: { expiresAt: new Date(Date.now() + (index + 2) * 36e5).toISOString() },
+      state: {
+        expiresAt: new Date(Date.now() + (index + 2) * 36e5).toISOString(),
+      },
     },
     {
       accountId: person.id,

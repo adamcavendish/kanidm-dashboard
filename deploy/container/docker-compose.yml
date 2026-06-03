@@ -45,6 +45,11 @@ services:
     environment:
       # Kanidm upstream URL (must be reachable from the dashboard container)
       KANIDM_UPSTREAM: https://kanidm:8443
+    # Customise the sign-in page title via a config file:
+    #   echo '{"siteName":"My Org","dataSource":{"mode":"kanidm","apiBasePath":""}}' > dashboard.config.json
+    #   Uncomment the volume below and recreate the container.
+    # volumes:
+    #   - ./dashboard.config.json:/config/dashboard.config.json:ro
     ports:
       - "127.0.0.1:8080:8080"
     networks:
