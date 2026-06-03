@@ -58,10 +58,26 @@ export interface Person {
   legalName: string;
   email: string;
   status: UserStatus;
+  validFrom?: string;
+  expireAt?: string;
+  softLockExpire?: string;
   groups: string[];
   credential: CredentialState;
   unix: UnixAccountSettings;
   lastAuth: string;
+}
+
+export interface PersonStatusPatch {
+  status: UserStatus;
+  validFrom?: string;
+  expireAt?: string;
+  softLockExpire?: string;
+}
+
+export interface PersonCertificate {
+  id: string;
+  label: string;
+  pem: string;
 }
 
 export interface Group {
@@ -289,6 +305,7 @@ export const defaultDashboardConfig: DashboardConfig = {
 
 export const supportedAdminSurfaces = [
   "Persons and self-service profile attributes",
+  "Person lifecycle, groups, certificates, and admin credential operations",
   "Groups and membership",
   "OAuth2/OIDC application display names and images",
   "Domain display name and domain image",

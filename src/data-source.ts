@@ -9,7 +9,9 @@ import type {
   NewGroupInput,
   NewPersonInput,
   Person,
+  PersonCertificate,
   PersonCreationResult,
+  PersonStatusPatch,
   ProfileUpdateInput,
   SshPublicKey,
   UnixAccountSettings,
@@ -31,20 +33,26 @@ import { AccountApi } from "./generated/kanidm-sdk/apis/AccountApi";
 import { PersonAttrApi } from "./generated/kanidm-sdk/apis/PersonAttrApi";
 import { GroupAttrApi } from "./generated/kanidm-sdk/apis/GroupAttrApi";
 import { PersonCredentialApi } from "./generated/kanidm-sdk/apis/PersonCredentialApi";
+import { PersonCertificateApi } from "./generated/kanidm-sdk/apis/PersonCertificateApi";
 import { CredentialApi } from "./generated/kanidm-sdk/apis/CredentialApi";
 import type { Entry } from "./generated/kanidm-sdk/models/Entry";
 import { createGroup, createOAuth2Application } from "./kanidm-composite";
-import { kanidmHttpError } from "./kanidm-error";
+import { KanidmHttpError, kanidmHttpError } from "./kanidm-error";
 import {
   personCreateEntry,
   mapUserAuthTokenStatus,
   mapCredentialUpdateStatus,
+  mapPersonCertificates,
 } from "./kanidm-mappers";
 
 export interface DashboardDataSource {
   load(): Promise<ConsoleState>;
   createPerson(input: NewPersonInput): Promise<PersonCreationResult>;
+  deletePerson(id: string): Promise<void>;
   updatePersonProfile(id: string, input: ProfileUpdateInput): Promise<void>;
+  updatePersonStatus(id: string, patch: PersonStatusPatch): Promise<void>;
+  personCertificates(id: string): Promise<PersonCertificate[]>;
+  addPersonCertificate(id: string, certificate: string): Promise<void>;
   createGroup(input: NewGroupInput): Promise<Pick<GroupCreationResult, "metadataWarnings">>;
   deleteGroup(id: string): Promise<void>;
   updateGroup(
@@ -185,6 +193,10 @@ export class KanidmDataSource implements DashboardDataSource {
     return { person: created, credentialIntent: intent };
   }
 
+  async deletePerson(id: string): Promise<void> {
+    await new PersonApi(this.config).personIdDelete({ id });
+  }
+
   async updatePersonProfile(id: string, input: ProfileUpdateInput): Promise<void> {
     await Promise.all([
       new PersonAttrApi(this.config).personIdPutAttr({
@@ -203,6 +215,35 @@ export class KanidmDataSource implements DashboardDataSource {
         body: [input.email.trim()],
       }),
     ]);
+  }
+
+  async updatePersonStatus(id: string, patch: PersonStatusPatch): Promise<void> {
+    const api = new PersonAttrApi(this.config);
+    const writes: Promise<void>[] = [];
+
+    if (patch.status === "locked") {
+      writes.push(api.personIdPutAttr({ id, attr: "nsaccountlock", body: ["true"] }));
+    } else {
+      writes.push(deletePersonAttr(api, id, "nsaccountlock"));
+    }
+
+    writeOptionalPersonAttr(api, writes, id, "accountexpire", patch.expireAt);
+    writeOptionalPersonAttr(api, writes, id, "accountsoftlockexpire", patch.softLockExpire);
+    writeOptionalPersonAttr(api, writes, id, "accountvalidfrom", patch.validFrom);
+
+    await Promise.all(writes);
+  }
+
+  async personCertificates(id: string): Promise<PersonCertificate[]> {
+    const entry = await new PersonCertificateApi(this.config).personGetIdCertificate({ id });
+    return mapPersonCertificates(entry as never);
+  }
+
+  async addPersonCertificate(id: string, certificate: string): Promise<void> {
+    await new PersonCertificateApi(this.config).personPostIdCertificate({
+      id,
+      body: { attrs: { certificate: [certificate.trim()] } } as unknown as Entry,
+    });
   }
 
   async createGroup(input: NewGroupInput): Promise<Pick<GroupCreationResult, "metadataWarnings">> {
@@ -322,29 +363,37 @@ export class KanidmDataSource implements DashboardDataSource {
   async deleteOAuth2ApplicationImage(appName: string): Promise<void> {
     await new Oauth2Api(this.config).oauth2IdImageDelete({ rsName: appName });
   }
+
   async radiusPassword(id: string): Promise<string | null> {
     try {
       const r = await new PersonRadiusApi(this.config).personIdRadiusTokenGet({
         id,
       });
       return r.secret;
-    } catch {
-      return null;
+    } catch (error) {
+      if (kanidmErrorStatus(error) === 404) return null;
+      throw error;
     }
   }
+
   async generateRadiusPassword(id: string): Promise<string | null> {
+    const api = new PersonRadiusApi(this.config);
+    await api.personIdRadiusPost({ id });
     try {
-      const api = new PersonRadiusApi(this.config);
-      await api.personIdRadiusPost({ id });
       const r = await api.personIdRadiusTokenGet({ id });
       return r.secret;
-    } catch {
-      return null;
+    } catch (error) {
+      if (kanidmErrorStatus(error) === 404) {
+        return null;
+      }
+      throw error;
     }
   }
+
   async deleteRadiusPassword(id: string): Promise<void> {
     await new PersonRadiusApi(this.config).personIdRadiusDelete({ id });
   }
+
   async sshPublicKeys(id: string): Promise<SshPublicKey[]> {
     const api = new PersonSshPubkeysApi(this.config);
     const tags = (await api.personIdSshPubkeysGet({ id })) as string[];
@@ -358,18 +407,21 @@ export class KanidmDataSource implements DashboardDataSource {
       })),
     );
   }
+
   async addSshPublicKey(id: string, tag: string, key: string): Promise<void> {
     await new PersonSshPubkeysApi(this.config).personIdSshPubkeysPost({
       id,
       body: [tag.trim(), key.trim()] as unknown as string[],
     });
   }
+
   async deleteSshPublicKey(id: string, tag: string): Promise<void> {
     await new PersonSshPubkeysApi(this.config).personIdSshPubkeysTagDelete({
       id,
       tag,
     });
   }
+
   async userAuthTokens(id: string): Promise<UserAuthTokenStatus[]> {
     const response = await new AccountApi(this.config).accountIdUserAuthTokenGetRaw({
       id,
@@ -379,12 +431,14 @@ export class KanidmDataSource implements DashboardDataSource {
     const tokens = JSON.parse(text) as Array<Record<string, unknown>>;
     return (tokens ?? []).map((token) => mapUserAuthTokenStatus(token));
   }
+
   async deleteUserAuthToken(id: string, sessionId: string): Promise<void> {
     await new AccountApi(this.config).accountUserAuthTokenDelete({
       id,
       tokenId: sessionId,
     });
   }
+
   async extendUnixAccount(
     id: string,
     input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
@@ -394,15 +448,18 @@ export class KanidmDataSource implements DashboardDataSource {
       body: { gidnumber: input.gidNumber, shell: input.shell } as never,
     });
   }
+
   async setUnixCredential(id: string, password: string): Promise<void> {
     await new PersonUnixApi(this.config).personIdUnixCredentialPut({
       id,
       body: { value: password },
     });
   }
+
   async deleteUnixCredential(id: string): Promise<void> {
     await new PersonUnixApi(this.config).personIdUnixCredentialDelete({ id });
   }
+
   async credentialUpdateIntent(id: string, ttl: number): Promise<CredentialUpdateIntent> {
     const r = await new PersonCredentialApi(this.config).personIdCredentialUpdateIntentTtlGet({
       id,
@@ -413,12 +470,14 @@ export class KanidmDataSource implements DashboardDataSource {
       expiryTime: r.expiryTime,
     };
   }
+
   async sendCredentialUpdateIntent(id: string, ttl: number, email: string): Promise<void> {
     await new PersonCredentialApi(this.config).personIdCredentialUpdateIntentSendPost({
       id,
       body: { ttl, email },
     });
   }
+
   async exchangeCredentialUpdateIntent(token: string): Promise<string> {
     const res = await fetch(`${this.config.basePath}/v1/credential/_exchange_intent`, {
       method: "POST",
@@ -433,6 +492,7 @@ export class KanidmDataSource implements DashboardDataSource {
     const body = (await res.json()) as [{ token: string }, unknown];
     return body[0].token;
   }
+
   async credentialUpdateStatus(token: string): Promise<CredentialUpdateStatus> {
     const res = await fetch(`${this.config.basePath}/v1/credential/_status`, {
       method: "POST",
@@ -447,6 +507,7 @@ export class KanidmDataSource implements DashboardDataSource {
     const body = await res.json();
     return mapCredentialUpdateStatus(token, body as never);
   }
+
   async credentialUpdate(sessionToken: string, body: unknown): Promise<CredentialUpdateStatus> {
     const res = await fetch(`${this.config.basePath}/v1/credential/_update`, {
       method: "POST",
@@ -461,28 +522,34 @@ export class KanidmDataSource implements DashboardDataSource {
     const r = await res.json();
     return mapCredentialUpdateStatus(sessionToken, r as never);
   }
+
   async commitCredentialUpdate(token: string): Promise<void> {
     await new CredentialApi(this.config).credentialUpdateCommit({
       body: { token },
     });
   }
+
   async cancelCredentialUpdate(token: string): Promise<void> {
     await new CredentialApi(this.config).credentialUpdateCancel({
       body: { token },
     });
   }
+
   async setDomainDisplayName(name: string): Promise<void> {
     await new DomainApi(this.config).domainAttrPut({
       attr: "domain_display_name",
       body: [name],
     });
   }
+
   async uploadDomainImage(file: File): Promise<void> {
     return this.uploadImage("/v1/domain/_image", file);
   }
+
   async deleteDomainImage(): Promise<void> {
     await new DomainApi(this.config).domainImageDelete();
   }
+
   async fetchImage(url: string): Promise<Blob> {
     const token = await this.config.accessToken?.();
     const response = await fetch(`${this.config.basePath}${url}`, {
@@ -497,11 +564,43 @@ export class KanidmDataSource implements DashboardDataSource {
   }
 }
 
+function writeOptionalPersonAttr(
+  api: PersonAttrApi,
+  writes: Promise<void>[],
+  id: string,
+  attr: string,
+  value: string | undefined,
+) {
+  if (value === undefined) return;
+  const trimmed = value.trim();
+  writes.push(
+    trimmed ? api.personIdPutAttr({ id, attr, body: [trimmed] }) : deletePersonAttr(api, id, attr),
+  );
+}
+
+function kanidmErrorStatus(error: unknown) {
+  if (error instanceof KanidmHttpError) return error.status;
+  if (error instanceof Error && "response" in error) {
+    return (error as { response?: Response }).response?.status;
+  }
+  return undefined;
+}
+
+async function deletePersonAttr(api: PersonAttrApi, id: string, attr: string) {
+  try {
+    await api.personIdDeleteAttr({ id, attr });
+  } catch (error) {
+    if (kanidmErrorStatus(error) === 404) return;
+    throw error;
+  }
+}
+
 import { initialState, seedPeople } from "./seed";
 
 export class MockDataSource implements DashboardDataSource {
   private state: ConsoleState;
   private radiusPasswords: Record<string, string> = {};
+  private certificates: Record<string, PersonCertificate[]> = {};
   private storageKey: string;
 
   constructor(storageKey = "kanidm-dashboard-state-v2") {
@@ -588,6 +687,17 @@ export class MockDataSource implements DashboardDataSource {
       credentialNotice: "Mock temporary password state was staged.",
     };
   }
+  async deletePerson(id: string): Promise<void> {
+    this.state = {
+      ...this.state,
+      people: this.state.people.filter((p) => p.id !== id),
+      groups: this.state.groups.map((g) => ({
+        ...g,
+        members: g.members.filter((memberId) => memberId !== id),
+      })),
+    };
+    this.persist();
+  }
   async updatePersonProfile(id: string, input: ProfileUpdateInput): Promise<void> {
     this.state = {
       ...this.state,
@@ -603,6 +713,39 @@ export class MockDataSource implements DashboardDataSource {
       ),
     };
     this.persist();
+  }
+  async updatePersonStatus(id: string, patch: PersonStatusPatch): Promise<void> {
+    this.state = {
+      ...this.state,
+      people: this.state.people.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              status: patch.status || p.status,
+              ...(patch.validFrom !== undefined ? { validFrom: patch.validFrom } : {}),
+              ...(patch.expireAt !== undefined ? { expireAt: patch.expireAt } : {}),
+              ...(patch.softLockExpire !== undefined
+                ? { softLockExpire: patch.softLockExpire }
+                : {}),
+            }
+          : p,
+      ),
+    };
+    this.persist();
+  }
+  async personCertificates(id: string): Promise<PersonCertificate[]> {
+    return this.certificates[id] ?? [];
+  }
+  async addPersonCertificate(id: string, certificate: string): Promise<void> {
+    const nextCertificate: PersonCertificate = {
+      id: `mock-cert-${Date.now()}`,
+      label: `Certificate ${(this.certificates[id] ?? []).length + 1}`,
+      pem: certificate.trim(),
+    };
+    this.certificates = {
+      ...this.certificates,
+      [id]: [...(this.certificates[id] ?? []), nextCertificate],
+    };
   }
   async createGroup(input: NewGroupInput): Promise<Pick<GroupCreationResult, "metadataWarnings">> {
     const group: Group = {

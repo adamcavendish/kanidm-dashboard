@@ -66,6 +66,7 @@ export const seedPeople: Person[] = [
     legalName: "Rin Morales",
     email: "rin@aster.example",
     status: "expiring",
+    expireAt: "2026-07-04T00:00:00Z",
     groups: ["g-design", "g-notion"],
     credential: {
       password: "needs-update",

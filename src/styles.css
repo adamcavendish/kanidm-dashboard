@@ -563,6 +563,28 @@ code {
   grid-template-columns: 330px minmax(0, 1fr);
 }
 
+.people-inspector {
+  align-items: start;
+}
+
+.people-inspector > *,
+.people-detail > *,
+.people-detail .glass-panel,
+.person-summary-grid > *,
+.profile-edit-grid > *,
+.person-ops-grid > *,
+.group-toggle-grid > * {
+  min-width: 0;
+}
+
+.people-inspector .resource-row {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.person-row-copy {
+  min-width: 0;
+}
+
 .admin-overview-panels {
   display: grid;
   gap: 18px;
@@ -675,6 +697,84 @@ td small,
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.people-detail {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.person-summary-grid,
+.profile-edit-grid,
+.person-ops-grid,
+.group-toggle-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.person-summary-grid,
+.profile-edit-grid,
+.person-ops-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.group-toggle-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  margin-bottom: 16px;
+}
+
+.access-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.access-preview h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.access-preview-row,
+.certificate-list details {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.access-preview-row strong,
+.access-preview-row small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.access-preview-row small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.compact-form {
+  margin-bottom: 12px;
+}
+
+.certificate-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.certificate-list summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 720;
+}
+
+.certificate-list code {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .glass-panel h2,
@@ -865,26 +965,30 @@ td small {
 }
 
 .credential-meter {
-  display: grid;
-  gap: 7px;
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.credential-meter::before,
+.credential-meter > span {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
 }
 
 .credential-meter::before {
   content: "";
+  width: 100%;
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
 }
 
 .credential-meter > span {
-  display: block;
-  height: 8px;
+  position: absolute;
+  top: 0;
+  left: 0;
   max-width: 100%;
-  border-radius: 999px;
   background: linear-gradient(90deg, var(--success), var(--accent));
-}
-
-.credential-meter {
-  min-height: 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 16%, transparent);
 }
 
 .credential-meter small {
@@ -913,6 +1017,7 @@ td small {
   grid-template-columns: minmax(120px, 0.36fr) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  min-width: 0;
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -991,6 +1096,29 @@ td small {
   gap: 6px;
   height: fit-content;
   padding: 8px;
+}
+
+.resource-empty {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  align-content: center;
+  justify-items: center;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.resource-empty strong {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.resource-empty small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .resource-row {
@@ -1224,13 +1352,19 @@ td small {
 .option-card {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 9px;
+  min-width: 0;
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
   padding: 8px 10px;
   cursor: pointer;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
 }
 
 .option-card {
@@ -1724,6 +1858,16 @@ td small {
   align-items: center;
 }
 
+.people-detail .detail-action-row > button {
+  flex: 1 1 176px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.compact-warning {
+  margin: -2px 0 0;
+}
+
 .image-action-row {
   gap: 10px 12px;
   align-items: flex-start;
@@ -1785,6 +1929,9 @@ td small {
   .two-column,
   .brand-layout,
   .split-admin,
+  .person-summary-grid,
+  .profile-edit-grid,
+  .person-ops-grid,
   .wizard-layout,
   .relationship-map {
     grid-template-columns: 1fr;
@@ -1881,6 +2028,14 @@ td small {
   .resource-row .status-badge {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .people-inspector .resource-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .people-inspector .resource-row .status-badge {
+    grid-column: 1;
   }
 
   .session-row {

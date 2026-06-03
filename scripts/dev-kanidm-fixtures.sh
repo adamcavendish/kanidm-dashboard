@@ -58,4 +58,4 @@ fi
 "${KANIDM[@]}" group add-members app_docs rin --url "$KANIDM_URL" "${KANIDM_TLS_FLAGS[@]}" || true
 
 echo "Core people and groups are ready."
-echo "OAuth2 app fixtures should be added after Phase 0 confirms the stable kanidm CLI/API shape for oauth2 create/update in this Kanidm version."
+echo "OAuth2 app fixtures should be added after planning confirms the stable kanidm CLI/API shape for oauth2 create/update in this Kanidm version."

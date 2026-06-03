@@ -29,6 +29,33 @@ describe("MockDataSource", () => {
     expect(pw).toBeNull();
   });
 
+  it("updates person status and deletes people", async () => {
+    await ds.updatePersonStatus("u-ava", {
+      status: "locked",
+      validFrom: "",
+      expireAt: "",
+      softLockExpire: "",
+    });
+    let state = await ds.load();
+    const updated = state.people.find((person) => person.id === "u-ava");
+    expect(updated?.status).toBe("locked");
+    expect(updated?.validFrom).toBe("");
+
+    await ds.deletePerson("u-ava");
+    state = await ds.load();
+    expect(state.people.some((person) => person.id === "u-ava")).toBe(false);
+  });
+
+  it("stores mock person certificates", async () => {
+    await ds.addPersonCertificate(
+      "u-mika",
+      "-----BEGIN CERTIFICATE-----\\nmock\\n-----END CERTIFICATE-----",
+    );
+    const certificates = await ds.personCertificates("u-mika");
+    expect(certificates).toHaveLength(1);
+    expect(certificates[0]?.pem).toContain("BEGIN CERTIFICATE");
+  });
+
   it("setDomainDisplayName updates branding", async () => {
     await ds.setDomainDisplayName("Test Corp");
     const state = await ds.load();
@@ -84,7 +111,21 @@ describe("KanidmDataSource", () => {
       }
       if (u.includes("/v1/person")) {
         return new Response(
-          JSON.stringify([{ attrs: { name: ["admin"], displayname: ["Admin"] } }]),
+          JSON.stringify([
+            {
+              attrs: {
+                name: ["admin"],
+                displayname: ["Admin"],
+                nsaccountlock: ["true"],
+                accountvalidfrom: ["2026-06-04T00:00:00Z"],
+                accountexpire: ["2026-07-04T00:00:00Z"],
+                accountsoftlockexpire: ["2026-06-20T00:00:00Z"],
+                sshpublickey: ["ssh-ed25519 AAAA..."],
+                totpimport: ["totp"],
+                radiussecret: ["secret"],
+              },
+            },
+          ]),
           { status: 200 },
         );
       }
@@ -118,6 +159,64 @@ describe("KanidmDataSource", () => {
       const state = await ds.load();
       expect(state.people).toBeDefined();
       expect(state.groups).toBeDefined();
+      expect(state.people[0]?.status).toBe("locked");
+      expect(state.people[0]?.credential.sshKeys).toBe(1);
+      expect(state.people[0]?.credential.totp).toBe(true);
+      expect(state.people[0]?.credential.radiusPassword).toBe(true);
+      expect(state.people[0]?.validFrom).toBe("2026-06-04T00:00:00Z");
+      expect(state.people[0]?.expireAt).toBe("2026-07-04T00:00:00Z");
+      expect(state.people[0]?.softLockExpire).toBe("2026-06-20T00:00:00Z");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses canonical person attrs for status updates", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      calls.push({
+        url: requestUrl,
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+      await ds.updatePersonStatus("admin", {
+        status: "expiring",
+        validFrom: "2026-06-04T00:00:00Z",
+        expireAt: "2026-07-04T00:00:00Z",
+        softLockExpire: "2026-06-20T00:00:00Z",
+      });
+      expect(calls.some((call) => call.url.includes("/_attr/accountexpire"))).toBe(true);
+      expect(calls.some((call) => call.url.includes("/_attr/accountvalidfrom"))).toBe(true);
+      expect(calls.some((call) => call.url.includes("/_attr/accountsoftlockexpire"))).toBe(true);
+      expect(calls.some((call) => call.url.includes("/_attr/nsaccountlock"))).toBe(true);
+      expect(calls.every((call) => !call.url.includes("account_expire"))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("propagates denied status attr deletes", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(null, { status: 403 })) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+      await expect(ds.updatePersonStatus("admin", { status: "active" })).rejects.toThrow();
     } finally {
       globalThis.fetch = originalFetch;
     }
