@@ -1,5 +1,6 @@
 import type {
   Application,
+  ApplicationPatch,
   ConsoleState,
   DashboardDataSourceConfig,
   Group,
@@ -16,7 +17,7 @@ import type {
   CredentialUpdateIntent,
   CredentialUpdateStatus,
 } from "./domain";
-import { mapKanidmState } from "./kanidm-mappers";
+import { mapKanidmState, oauth2PatchEntry } from "./kanidm-mappers";
 import { Configuration } from "./generated/kanidm-sdk/runtime/runtime";
 import { SelfApi } from "./generated/kanidm-sdk/apis/SelfApi";
 import { PersonApi } from "./generated/kanidm-sdk/apis/PersonApi";
@@ -53,6 +54,14 @@ export interface DashboardDataSource {
   addGroupMembers(name: string, members: string[]): Promise<void>;
   removeGroupMembers(name: string, members: string[]): Promise<void>;
   createOAuth2Application(input: NewApplicationInput): Promise<{ clientSecret?: string }>;
+  updateOAuth2Application(appName: string, patch: ApplicationPatch): Promise<void>;
+  deleteOAuth2Application(appName: string): Promise<void>;
+  updateOAuth2ApplicationScopeMap(
+    appName: string,
+    groupName: string,
+    scopes: string[],
+  ): Promise<void>;
+  deleteOAuth2ApplicationScopeMap(appName: string, groupName: string): Promise<void>;
   uploadOAuth2ApplicationImage(appName: string, file: File): Promise<void>;
   deleteOAuth2ApplicationImage(appName: string): Promise<void>;
   radiusPassword(id: string): Promise<string | null>;
@@ -211,10 +220,22 @@ export class KanidmDataSource implements DashboardDataSource {
     const attrApi = new GroupAttrApi(this.config);
     const updates: Promise<unknown>[] = [];
     if (patch.displayName !== undefined) {
-      updates.push(attrApi.groupIdAttrPut({ id, attr: "displayname", body: [patch.displayName] }));
+      updates.push(
+        attrApi.groupIdAttrPut({
+          id,
+          attr: "displayname",
+          body: [patch.displayName],
+        }),
+      );
     }
     if (patch.description !== undefined) {
-      updates.push(attrApi.groupIdAttrPut({ id, attr: "description", body: [patch.description] }));
+      updates.push(
+        attrApi.groupIdAttrPut({
+          id,
+          attr: "description",
+          body: [patch.description],
+        }),
+      );
     }
     if (patch.managedBy !== undefined) {
       const body = patch.managedBy ? [patch.managedBy] : [];
@@ -243,6 +264,41 @@ export class KanidmDataSource implements DashboardDataSource {
     return createOAuth2Application(this.config, input);
   }
 
+  async updateOAuth2Application(appName: string, patch: ApplicationPatch): Promise<void> {
+    const hasMetadata =
+      patch.displayName !== undefined ||
+      patch.landingUrl !== undefined ||
+      patch.redirectUris !== undefined;
+    if (!hasMetadata) return;
+    await new Oauth2Api(this.config).oauth2IdPatch({
+      rsName: appName,
+      body: oauth2PatchEntry(patch) as unknown as Entry,
+    });
+  }
+
+  async deleteOAuth2Application(appName: string): Promise<void> {
+    await new Oauth2Api(this.config).oauth2IdDelete({ rsName: appName });
+  }
+
+  async updateOAuth2ApplicationScopeMap(
+    appName: string,
+    groupName: string,
+    scopes: string[],
+  ): Promise<void> {
+    await new Oauth2Api(this.config).oauth2IdScopemapPost({
+      rsName: appName,
+      group: groupName,
+      body: scopes,
+    });
+  }
+
+  async deleteOAuth2ApplicationScopeMap(appName: string, groupName: string): Promise<void> {
+    await new Oauth2Api(this.config).oauth2IdScopemapDelete({
+      rsName: appName,
+      group: groupName,
+    });
+  }
+
   private async uploadImage(path: string, file: File): Promise<void> {
     const form = new FormData();
     form.append("file", file);
@@ -268,7 +324,9 @@ export class KanidmDataSource implements DashboardDataSource {
   }
   async radiusPassword(id: string): Promise<string | null> {
     try {
-      const r = await new PersonRadiusApi(this.config).personIdRadiusTokenGet({ id });
+      const r = await new PersonRadiusApi(this.config).personIdRadiusTokenGet({
+        id,
+      });
       return r.secret;
     } catch {
       return null;
@@ -293,7 +351,10 @@ export class KanidmDataSource implements DashboardDataSource {
     return Promise.all(
       tags.map(async (tag) => ({
         tag,
-        key: (await api.personIdSshPubkeysTagGet({ id, tag })) as unknown as string,
+        key: (await api.personIdSshPubkeysTagGet({
+          id,
+          tag,
+        })) as unknown as string,
       })),
     );
   }
@@ -304,7 +365,10 @@ export class KanidmDataSource implements DashboardDataSource {
     });
   }
   async deleteSshPublicKey(id: string, tag: string): Promise<void> {
-    await new PersonSshPubkeysApi(this.config).personIdSshPubkeysTagDelete({ id, tag });
+    await new PersonSshPubkeysApi(this.config).personIdSshPubkeysTagDelete({
+      id,
+      tag,
+    });
   }
   async userAuthTokens(id: string): Promise<UserAuthTokenStatus[]> {
     const response = await new AccountApi(this.config).accountIdUserAuthTokenGetRaw({
@@ -316,7 +380,10 @@ export class KanidmDataSource implements DashboardDataSource {
     return (tokens ?? []).map((token) => mapUserAuthTokenStatus(token));
   }
   async deleteUserAuthToken(id: string, sessionId: string): Promise<void> {
-    await new AccountApi(this.config).accountUserAuthTokenDelete({ id, tokenId: sessionId });
+    await new AccountApi(this.config).accountUserAuthTokenDelete({
+      id,
+      tokenId: sessionId,
+    });
   }
   async extendUnixAccount(
     id: string,
@@ -356,7 +423,10 @@ export class KanidmDataSource implements DashboardDataSource {
     const res = await fetch(`${this.config.basePath}/v1/credential/_exchange_intent`, {
       method: "POST",
       credentials: "include",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(token),
     });
     if (!res.ok) throw new Error(`Credential exchange failed: ${res.status}`);
@@ -367,7 +437,10 @@ export class KanidmDataSource implements DashboardDataSource {
     const res = await fetch(`${this.config.basePath}/v1/credential/_status`, {
       method: "POST",
       credentials: "include",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ token }),
     });
     if (!res.ok) throw new Error(`Credential status failed: ${res.status}`);
@@ -378,7 +451,10 @@ export class KanidmDataSource implements DashboardDataSource {
     const res = await fetch(`${this.config.basePath}/v1/credential/_update`, {
       method: "POST",
       credentials: "include",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`Credential update failed: ${res.status}`);
@@ -386,13 +462,20 @@ export class KanidmDataSource implements DashboardDataSource {
     return mapCredentialUpdateStatus(sessionToken, r as never);
   }
   async commitCredentialUpdate(token: string): Promise<void> {
-    await new CredentialApi(this.config).credentialUpdateCommit({ body: { token } });
+    await new CredentialApi(this.config).credentialUpdateCommit({
+      body: { token },
+    });
   }
   async cancelCredentialUpdate(token: string): Promise<void> {
-    await new CredentialApi(this.config).credentialUpdateCancel({ body: { token } });
+    await new CredentialApi(this.config).credentialUpdateCancel({
+      body: { token },
+    });
   }
   async setDomainDisplayName(name: string): Promise<void> {
-    await new DomainApi(this.config).domainAttrPut({ attr: "domain_display_name", body: [name] });
+    await new DomainApi(this.config).domainAttrPut({
+      attr: "domain_display_name",
+      body: [name],
+    });
   }
   async uploadDomainImage(file: File): Promise<void> {
     return this.uploadImage("/v1/domain/_image", file);
@@ -500,7 +583,10 @@ export class MockDataSource implements DashboardDataSource {
         credentialNotice: "Mock recovery email marked as sent.",
       };
     }
-    return { person, credentialNotice: "Mock temporary password state was staged." };
+    return {
+      person,
+      credentialNotice: "Mock temporary password state was staged.",
+    };
   }
   async updatePersonProfile(id: string, input: ProfileUpdateInput): Promise<void> {
     this.state = {
@@ -539,7 +625,10 @@ export class MockDataSource implements DashboardDataSource {
     return { metadataWarnings: [] };
   }
   async deleteGroup(id: string): Promise<void> {
-    this.state = { ...this.state, groups: this.state.groups.filter((g) => g.id !== id) };
+    this.state = {
+      ...this.state,
+      groups: this.state.groups.filter((g) => g.id !== id),
+    };
     this.persist();
   }
   async updateGroup(
@@ -606,6 +695,77 @@ export class MockDataSource implements DashboardDataSource {
   }
   async uploadOAuth2ApplicationImage(_appName: string, _file: File): Promise<void> {}
   async deleteOAuth2ApplicationImage(_appName: string): Promise<void> {}
+  async updateOAuth2Application(appName: string, patch: ApplicationPatch): Promise<void> {
+    this.state = {
+      ...this.state,
+      apps: this.state.apps.map((app) =>
+        app.name === appName
+          ? {
+              ...app,
+              ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+              ...(patch.landingUrl !== undefined ? { landingUrl: patch.landingUrl } : {}),
+              ...(patch.redirectUris !== undefined ? { redirectUris: patch.redirectUris } : {}),
+            }
+          : app,
+      ),
+    };
+    this.persist();
+  }
+  async deleteOAuth2Application(appName: string): Promise<void> {
+    this.state = {
+      ...this.state,
+      apps: this.state.apps.filter((app) => app.name !== appName),
+    };
+    this.persist();
+  }
+  async updateOAuth2ApplicationScopeMap(
+    appName: string,
+    groupName: string,
+    scopes: string[],
+  ): Promise<void> {
+    this.state = {
+      ...this.state,
+      apps: this.state.apps.map((app) => {
+        if (app.name !== appName) return app;
+        const existingMaps = app.scopeMaps ?? [];
+        const existingIndex = existingMaps.findIndex((sm) => sm.groupId === groupName);
+        const newMap = { groupId: groupName, scopes };
+        const scopeMaps =
+          existingIndex >= 0
+            ? existingMaps.map((sm, i) => (i === existingIndex ? newMap : sm))
+            : [...existingMaps, newMap];
+        const allowedGroups = [...new Set(scopeMaps.map((sm) => sm.groupId))];
+        const allScopes = [...new Set(scopeMaps.flatMap((sm) => sm.scopes))];
+        return {
+          ...app,
+          scopeMaps,
+          allowedGroups,
+          scopes: allScopes.length ? allScopes : ["openid", "profile"],
+          status: allowedGroups.length ? "ready" : "attention",
+        };
+      }),
+    };
+    this.persist();
+  }
+  async deleteOAuth2ApplicationScopeMap(appName: string, groupName: string): Promise<void> {
+    this.state = {
+      ...this.state,
+      apps: this.state.apps.map((app) => {
+        if (app.name !== appName) return app;
+        const scopeMaps = (app.scopeMaps ?? []).filter((sm) => sm.groupId !== groupName);
+        const allowedGroups = [...new Set(scopeMaps.map((sm) => sm.groupId))];
+        const allScopes = [...new Set(scopeMaps.flatMap((sm) => sm.scopes))];
+        return {
+          ...app,
+          scopeMaps,
+          allowedGroups,
+          scopes: allScopes.length ? allScopes : ["openid", "profile"],
+          status: allowedGroups.length ? "ready" : "attention",
+        };
+      }),
+    };
+    this.persist();
+  }
   async generateRadiusPassword(id: string): Promise<string | null> {
     const pw = `rad-demo-${Math.random().toString(36).slice(2, 10)}`;
     this.radiusPasswords[id] = pw;
@@ -627,7 +787,13 @@ export class MockDataSource implements DashboardDataSource {
       ...this.state,
       people: this.state.people.map((p) =>
         p.id === id
-          ? { ...p, credential: { ...p.credential, sshKeys: p.credential.sshKeys + 1 } }
+          ? {
+              ...p,
+              credential: {
+                ...p.credential,
+                sshKeys: p.credential.sshKeys + 1,
+              },
+            }
           : p,
       ),
     };
@@ -640,7 +806,10 @@ export class MockDataSource implements DashboardDataSource {
         p.id === id
           ? {
               ...p,
-              credential: { ...p.credential, sshKeys: Math.max(0, p.credential.sshKeys - 1) },
+              credential: {
+                ...p.credential,
+                sshKeys: Math.max(0, p.credential.sshKeys - 1),
+              },
             }
           : p,
       ),
@@ -669,7 +838,14 @@ export class MockDataSource implements DashboardDataSource {
       ...this.state,
       people: this.state.people.map((p) =>
         p.id === id
-          ? { ...p, unix: { ...p.unix, gidNumber: input.gidNumber, shell: input.shell } }
+          ? {
+              ...p,
+              unix: {
+                ...p.unix,
+                gidNumber: input.gidNumber,
+                shell: input.shell,
+              },
+            }
           : p,
       ),
     };
@@ -694,7 +870,10 @@ export class MockDataSource implements DashboardDataSource {
     this.persist();
   }
   async setDomainDisplayName(name: string): Promise<void> {
-    this.state = { ...this.state, branding: { ...this.state.branding, companyName: name } };
+    this.state = {
+      ...this.state,
+      branding: { ...this.state.branding, companyName: name },
+    };
     this.persist();
   }
   async uploadDomainImage(_file: File): Promise<void> {
@@ -705,7 +884,10 @@ export class MockDataSource implements DashboardDataSource {
     this.persist();
   }
   async deleteDomainImage(): Promise<void> {
-    this.state = { ...this.state, branding: { ...this.state.branding, logoUrl: "" } };
+    this.state = {
+      ...this.state,
+      branding: { ...this.state.branding, logoUrl: "" },
+    };
     this.persist();
   }
   async fetchImage(_url: string): Promise<Blob> {

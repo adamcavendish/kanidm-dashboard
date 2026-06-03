@@ -1,5 +1,6 @@
 import type {
   Application,
+  ApplicationPatch,
   ConsoleState,
   CredentialUpdateStatus,
   Group,
@@ -130,10 +131,21 @@ export function oauth2ScopeMaps(input: NewApplicationInput) {
     .filter((scopeMap) => scopeMap.groupId && scopeMap.scopes.length > 0);
 }
 
-function compactAttrs(attrs: Record<string, string[]>) {
+export function oauth2PatchEntry(patch: ApplicationPatch): KanidmEntry {
+  return {
+    attrs: compactAttrs({
+      displayname: patch.displayName !== undefined ? [patch.displayName.trim()] : undefined,
+      oauth2_rs_origin_landing:
+        patch.landingUrl !== undefined ? [patch.landingUrl.trim()] : undefined,
+      oauth2_rs_origin: patch.redirectUris?.map((v) => v.trim()),
+    }),
+  };
+}
+
+function compactAttrs(attrs: Record<string, string[] | undefined>) {
   return Object.fromEntries(
     Object.entries(attrs)
-      .map(([key, values]) => [key, values.filter(Boolean)] as const)
+      .map(([key, values]) => [key, (values ?? []).filter(Boolean)] as const)
       .filter(([, values]) => values.length > 0),
   );
 }

@@ -238,6 +238,12 @@ export interface NewApplicationInput {
   scopeMaps?: ApplicationScopeMap[];
 }
 
+export interface ApplicationPatch {
+  displayName?: string;
+  landingUrl?: string;
+  redirectUris?: string[];
+}
+
 export interface ProfileUpdateInput {
   displayName: string;
   legalName: string;

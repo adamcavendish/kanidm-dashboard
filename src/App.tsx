@@ -46,6 +46,7 @@ import {
 } from "lucide-solid";
 import type {
   Application,
+  ApplicationPatch,
   ApplicationScopeMap,
   BrandingSettings,
   CredentialUpdateIntent,
@@ -77,6 +78,7 @@ import {
   themePreviewStyle,
   useConsole,
 } from "./store";
+import { KanidmDataSource } from "./data-source";
 import ErrorBox from "./components/error-box";
 import Checklist from "./components/checklist";
 import OptionGrid from "./components/option-grid";
@@ -2904,18 +2906,21 @@ function AdminOverviewPage() {
           detail={config().theme.mode}
         />
       </div>
-      <div class="two-column">
-        <GlassPanel title="Supported Kanidm surfaces">
-          <Checklist items={supportedAdminSurfaces} />
-        </GlassPanel>
-        <GlassPanel title="Excluded from this console">
-          <Checklist items={intentionallyExcludedSurfaces} muted />
+      <div class="admin-overview-panels">
+        <div class="two-column">
+          <GlassPanel title="Supported Kanidm surfaces">
+            <Checklist items={supportedAdminSurfaces} />
+          </GlassPanel>
+          <GlassPanel title="Excluded from this console">
+            <Checklist items={intentionallyExcludedSurfaces} muted />
+          </GlassPanel>
+        </div>
+        <GlassPanel title="Recent access changes">
+          <p class="muted panel-copy">
+            Access audit logging is not available in this dashboard release.
+          </p>
         </GlassPanel>
       </div>
-      <GlassPanel title="Recent access changes">
-        <p class="muted">{/* TODO: Wire up activity feed from Kanidm audit log endpoint */}</p>
-        <p class="muted">Access audit logging is not available in this dashboard release.</p>
-      </GlassPanel>
     </>
   );
 }
@@ -3457,11 +3462,65 @@ function GroupsPage() {
 }
 
 function ApplicationsPage() {
-  const { state, uploadAppImage, resetAppImage } = useConsole();
+  const { state, config, uploadAppImage, resetAppImage, updateApplication, deleteApplication } =
+    useConsole();
+  const { navigate } = useNavigation();
   const [query, setQuery] = createSignal("");
-  const [imageBusy, setImageBusy] = createSignal("");
+  const [selectedAppId, setSelectedAppId] = createSignal(state().apps[0]?.id ?? "");
+  const [editDisplayName, setEditDisplayName] = createSignal("");
+  const [editLandingUrl, setEditLandingUrl] = createSignal("");
+  const [editRedirectText, setEditRedirectText] = createSignal("");
+  const [editAllowedGroups, setEditAllowedGroups] = createSignal<string[]>([]);
+  const [editScopeMaps, setEditScopeMaps] = createSignal<ApplicationScopeMap[]>([]);
+  const [editing, setEditing] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal("");
+  const [imageBusy, setImageBusy] = createSignal(false);
   const [imageError, setImageError] = createSignal("");
+  const [customScope, setCustomScope] = createSignal("");
+
   const apps = () => state().apps.filter((app) => searchable(app).includes(query().toLowerCase()));
+  const selectedApp = () =>
+    state().apps.find((app) => app.id === selectedAppId()) ?? state().apps[0];
+
+  const editRedirectUris = () =>
+    editRedirectText()
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+  const scopesForEditingGroup = (groupId: string) =>
+    editScopeMaps().find((sm) => sm.groupId === groupId)?.scopes ?? [];
+
+  const extraScopes = () => {
+    const seen = new Set(standardScopes);
+    const extra: string[] = [];
+    for (const app of state().apps) {
+      for (const scope of app.scopes) {
+        if (!seen.has(scope)) {
+          seen.add(scope);
+          extra.push(scope);
+        }
+      }
+    }
+    return extra;
+  };
+
+  createEffect(() => {
+    const app = selectedApp();
+    if (app) {
+      setEditDisplayName(app.displayName);
+      setEditLandingUrl(app.landingUrl);
+      setEditRedirectText(app.redirectUris.join("\n"));
+      setEditAllowedGroups([...app.allowedGroups]);
+      setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
+      setEditing(false);
+      setDeleting(false);
+      setError("");
+      setImageError("");
+    }
+  });
 
   async function handleAppImageUpload(app: Application, event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -3475,28 +3534,55 @@ function ApplicationsPage() {
       return;
     }
 
-    setImageBusy(app.id);
+    setImageBusy(true);
     setImageError("");
     try {
       await uploadAppImage(app.id, file);
       input.value = "";
-    } catch (error) {
-      setImageError(error instanceof Error ? error.message : "Could not upload application image.");
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Could not upload application image.");
     } finally {
-      setImageBusy("");
+      setImageBusy(false);
     }
   }
 
   async function handleResetAppImage(app: Application) {
-    setImageBusy(app.id);
+    setImageBusy(true);
     setImageError("");
     try {
       await resetAppImage(app.id);
-    } catch (error) {
-      setImageError(error instanceof Error ? error.message : "Could not reset application image.");
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Could not reset application image.");
     } finally {
-      setImageBusy("");
+      setImageBusy(false);
     }
+  }
+
+  function toggleAccessGroup(groupId: string) {
+    const nextGroups = toggleValue(editAllowedGroups(), groupId);
+    setEditAllowedGroups(nextGroups);
+    setEditScopeMaps(editScopeMaps().filter((sm) => nextGroups.includes(sm.groupId)));
+  }
+
+  function toggleGroupScope(groupId: string, scope: string) {
+    const currentScopes = scopesForEditingGroup(groupId);
+    const nextScopes = toggleValue(currentScopes, scope);
+    if (nextScopes.length === 0) return;
+    const existing = editScopeMaps().find((sm) => sm.groupId === groupId);
+    if (existing) {
+      setEditScopeMaps(
+        editScopeMaps().map((sm) => (sm.groupId === groupId ? { ...sm, scopes: nextScopes } : sm)),
+      );
+    } else {
+      setEditScopeMaps([...editScopeMaps(), { groupId, scopes: nextScopes }]);
+    }
+  }
+
+  function addCustomScopeToGroup(groupId: string) {
+    const scope = customScope().trim();
+    if (!scope) return;
+    toggleGroupScope(groupId, scope);
+    setCustomScope("");
   }
 
   return (
@@ -3517,87 +3603,387 @@ function ApplicationsPage() {
           <span>{imageError()}</span>
         </div>
       </Show>
-      <div class="table-shell">
-        <table>
-          <thead>
-            <tr>
-              <th>Application</th>
-              <th>Client</th>
-              <th>Access groups</th>
-              <th>Scopes</th>
-              <th>Status</th>
-              <th>Image</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={apps()}>
-              {(app) => (
-                <tr>
-                  <td>
-                    <span class="table-app">
-                      <AppIcon app={app} />
-                      <span>
-                        <strong>{app.displayName}</strong>
-                        <small>{app.landingUrl}</small>
-                      </span>
-                    </span>
-                  </td>
-                  <td>{app.clientType}</td>
-                  <td>
-                    {app.allowedGroups
-                      .map((groupId) => labelForGroup(state().groups, groupId))
-                      .join(", ")}
-                  </td>
-                  <td>
-                    <Show when={app.scopeMaps?.length} fallback={app.scopes.join(", ")}>
-                      <div class="scope-map-summary">
-                        <For each={app.scopeMaps}>
-                          {(scopeMap) => (
-                            <span>
-                              <strong>{labelForGroup(state().groups, scopeMap.groupId)}</strong>:{" "}
-                              {scopeMap.scopes.join(", ")}
-                            </span>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </td>
-                  <td>
-                    <AppStatusBadge status={app.status} />
-                  </td>
-                  <td>
-                    <div class="image-action-stack">
+      <div class="split-admin">
+        <div class="resource-list">
+          <For each={apps()}>
+            {(app) => (
+              <button
+                class={app.id === selectedApp()?.id ? "resource-row active" : "resource-row"}
+                type="button"
+                onClick={() => setSelectedAppId(app.id)}
+              >
+                <AppIcon app={app} />
+                <span>
+                  <strong>{app.displayName}</strong>
+                  <small>{app.name}</small>
+                </span>
+                <AppStatusBadge status={app.status} />
+              </button>
+            )}
+          </For>
+        </div>
+        <div class="resource-detail">
+          <GlassPanel title={selectedApp()?.displayName ?? "Application"}>
+            <KeyValue label="System name" value={selectedApp()?.name ?? ""} variant="detail" />
+            <KeyValue
+              label="Client type"
+              value={selectedApp()?.clientType ?? ""}
+              variant="detail"
+            />
+            <Show
+              when={editing()}
+              fallback={
+                <>
+                  <KeyValue
+                    label="Display name"
+                    value={selectedApp()?.displayName ?? ""}
+                    variant="detail"
+                  />
+                  <KeyValue
+                    label="Landing URL"
+                    value={selectedApp()?.landingUrl ?? ""}
+                    variant="detail"
+                  />
+                  <KeyValue
+                    label="Redirect URIs"
+                    value={
+                      selectedApp()?.redirectUris.length
+                        ? selectedApp()!.redirectUris.join(", ")
+                        : "None"
+                    }
+                    variant="detail"
+                  />
+                  <KeyValue
+                    label="Access groups"
+                    value={
+                      selectedApp()
+                        ?.allowedGroups.map((groupId) => labelForGroup(state().groups, groupId))
+                        .join(", ") || "None"
+                    }
+                    variant="detail"
+                  />
+                  <KeyValue
+                    label="Status"
+                    value={<AppStatusBadge status={selectedApp()?.status ?? "attention"} />}
+                    variant="detail"
+                  />
+                  <Show when={selectedApp()?.scopeMaps?.length}>
+                    <div class="scope-map-summary">
+                      <h4>Scope maps</h4>
+                      <For each={selectedApp()?.scopeMaps ?? []}>
+                        {(scopeMap) => (
+                          <div class="scope-map-summary-row">
+                            <strong>{labelForGroup(state().groups, scopeMap.groupId)}</strong>
+                            <div class="chip-row">
+                              <For each={scopeMap.scopes}>
+                                {(scope) => <span class="chip">{scope}</span>}
+                              </For>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                  <div class="detail-actions">
+                    <div class="detail-action-row image-action-row">
                       <label class="file-button compact-file">
-                        <Upload size={15} /> Upload
+                        <Upload size={15} /> Upload image
                         <input
                           type="file"
                           accept=".png,.jpg,.jpeg,.gif,.svg,.webp"
-                          disabled={imageBusy() === app.id}
+                          disabled={imageBusy()}
                           onChange={(event) => {
-                            void handleAppImageUpload(app, event);
+                            const app = selectedApp();
+                            if (app) void handleAppImageUpload(app, event);
                           }}
                         />
                       </label>
                       <button
                         class="secondary-action"
                         type="button"
-                        disabled={imageBusy() === app.id}
+                        disabled={imageBusy()}
                         onClick={() => {
-                          void handleResetAppImage(app);
+                          const app = selectedApp();
+                          if (app) void handleResetAppImage(app);
                         }}
                       >
-                        <Trash2 size={15} /> Reset
+                        <Trash2 size={15} /> Reset image
                       </button>
-                      <Show when={imageBusy() === app.id}>
+                      <Show when={imageBusy()}>
                         <small>Saving image</small>
                       </Show>
                     </div>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
+                    <ErrorBox error={error} />
+                    <div class="detail-action-row">
+                      <button
+                        class="secondary-action"
+                        type="button"
+                        onClick={() => setEditing(true)}
+                      >
+                        Edit
+                      </button>
+                      <Show when={!deleting()}>
+                        <button
+                          class="danger-action"
+                          type="button"
+                          onClick={() => setDeleting(true)}
+                        >
+                          <Trash2 size={14} /> Delete application
+                        </button>
+                      </Show>
+                      <Show when={deleting()}>
+                        <span class="muted">Confirm delete?</span>
+                        <button
+                          class="danger-action"
+                          type="button"
+                          disabled={busy()}
+                          onClick={async () => {
+                            setBusy(true);
+                            setError("");
+                            try {
+                              await deleteApplication(selectedApp()!.id);
+                              navigate("/admin/apps");
+                            } catch (err) {
+                              setError(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Could not delete application.",
+                              );
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          {busy() ? "Deleting…" : "Yes, delete"}
+                        </button>
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          disabled={busy()}
+                          onClick={() => setDeleting(false)}
+                        >
+                          Cancel
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+                </>
+              }
+            >
+              <div class="field-stack">
+                <TextField
+                  label="Display name"
+                  value={editDisplayName()}
+                  onInput={setEditDisplayName}
+                />
+                <TextField
+                  label="Landing URL"
+                  value={editLandingUrl()}
+                  onInput={setEditLandingUrl}
+                  type="url"
+                />
+                <ErrorBox error={error} />
+                <label>
+                  Redirect URIs
+                  <textarea
+                    rows={4}
+                    value={editRedirectText()}
+                    onInput={(e) => setEditRedirectText(e.currentTarget.value)}
+                    placeholder="https://app.example/oauth/callback"
+                  />
+                </label>
+              </div>
+            </Show>
+          </GlassPanel>
+
+          <Show when={editing()}>
+            <GlassPanel title="Access groups and scopes">
+              <div class="option-grid">
+                <For each={state().groups}>
+                  {(group) => {
+                    const selected = () => editAllowedGroups().includes(group.id);
+                    return (
+                      <button
+                        class={selected() ? "option-card selected" : "option-card"}
+                        type="button"
+                        onClick={() => toggleAccessGroup(group.id)}
+                      >
+                        <span>
+                          <Show when={selected()} fallback={<Plus size={16} />}>
+                            <Check size={16} />
+                          </Show>
+                        </span>
+                        <strong>{group.displayName}</strong>
+                        <small>{group.name}</small>
+                      </button>
+                    );
+                  }}
+                </For>
+              </div>
+
+              <Show when={editAllowedGroups().length > 0}>
+                <h4>Scopes per group</h4>
+                <For each={editAllowedGroups()}>
+                  {(groupId) => (
+                    <div class="scope-map-editor">
+                      <strong>{labelForGroup(state().groups, groupId)}</strong>
+                      <div class="scope-toggle-row">
+                        <For each={standardScopes}>
+                          {(scope) => {
+                            const active = () => scopesForEditingGroup(groupId).includes(scope);
+                            return (
+                              <button
+                                class={active() ? "scope-toggle selected" : "scope-toggle"}
+                                type="button"
+                                onClick={() => toggleGroupScope(groupId, scope)}
+                              >
+                                {scope}
+                              </button>
+                            );
+                          }}
+                        </For>
+                        <For each={extraScopes()}>
+                          {(scope) => {
+                            const active = () => scopesForEditingGroup(groupId).includes(scope);
+                            return (
+                              <button
+                                class={active() ? "scope-toggle selected" : "scope-toggle"}
+                                type="button"
+                                onClick={() => toggleGroupScope(groupId, scope)}
+                              >
+                                {scope}
+                              </button>
+                            );
+                          }}
+                        </For>
+                      </div>
+                      <div class="custom-scope-row">
+                        <input
+                          type="text"
+                          placeholder="Custom scope name"
+                          value={customScope()}
+                          onInput={(e) => setCustomScope(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addCustomScopeToGroup(groupId);
+                            }
+                          }}
+                        />
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          onClick={() => addCustomScopeToGroup(groupId)}
+                        >
+                          <Plus size={14} /> Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </GlassPanel>
+          </Show>
+
+          <Show when={editing()}>
+            <div class="edit-toolbar">
+              <button
+                class="primary-action"
+                type="button"
+                disabled={busy()}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    const app = selectedApp();
+                    if (!app) return;
+
+                    const patch: ApplicationPatch = {};
+                    if (editDisplayName() !== app.displayName) {
+                      patch.displayName = editDisplayName();
+                    }
+                    if (editLandingUrl() !== app.landingUrl) {
+                      patch.landingUrl = editLandingUrl();
+                    }
+                    const newRedirectUris = editRedirectUris();
+                    const redirectsChanged =
+                      newRedirectUris.length !== app.redirectUris.length ||
+                      newRedirectUris.some((uri, i) => uri !== app.redirectUris[i]);
+                    if (redirectsChanged) {
+                      patch.redirectUris = newRedirectUris;
+                    }
+
+                    if (Object.keys(patch).length > 0) {
+                      await updateApplication(app.id, patch);
+                    }
+
+                    // Handle scope map changes (Kanidm mode only)
+                    if (config().dataSource.mode === "kanidm") {
+                      const nextGroupIds = new Set(editAllowedGroups());
+                      const groupNames = new Map(state().groups.map((g) => [g.id, g.name]));
+
+                      const ds = new KanidmDataSource(
+                        config().dataSource,
+                        sessionStorage.getItem("kanidm-dashboard-kanidm-token") ?? undefined,
+                      );
+
+                      // Remove scope maps for deselected groups
+                      for (const removed of app.allowedGroups) {
+                        if (!nextGroupIds.has(removed)) {
+                          const groupName = groupNames.get(removed) ?? removed;
+                          await ds.deleteOAuth2ApplicationScopeMap(app.name, groupName);
+                        }
+                      }
+
+                      // Add/update scope maps for selected groups
+                      for (const groupId of editAllowedGroups()) {
+                        const groupName = groupNames.get(groupId) ?? groupId;
+                        const editSM = editScopeMaps().find((sm) => sm.groupId === groupId);
+                        const origSM = app.scopeMaps?.find((sm) => sm.groupId === groupId);
+                        const newScopes = editSM?.scopes ?? [];
+                        const oldScopes = origSM?.scopes ?? [];
+
+                        const scopesChanged =
+                          newScopes.length !== oldScopes.length ||
+                          newScopes.some((s, i) => s !== oldScopes[i]);
+
+                        if (!origSM || scopesChanged) {
+                          await ds.updateOAuth2ApplicationScopeMap(app.name, groupName, newScopes);
+                        }
+                      }
+                    }
+
+                    setEditing(false);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not save application.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy() ? "Saving…" : "Save changes"}
+              </button>
+              <button
+                class="secondary-action"
+                type="button"
+                disabled={busy()}
+                onClick={() => {
+                  setEditing(false);
+                  const app = selectedApp();
+                  if (app) {
+                    setEditDisplayName(app.displayName);
+                    setEditLandingUrl(app.landingUrl);
+                    setEditRedirectText(app.redirectUris.join("\n"));
+                    setEditAllowedGroups([...app.allowedGroups]);
+                    setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
+                  }
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </Show>
+        </div>
       </div>
     </>
   );
@@ -3728,7 +4114,10 @@ function BrandingPage() {
         throw new Error("Current Kanidm session cannot manage native domain branding.");
       }
       await updateNativeBranding({ companyName: draft().companyName });
-      setDraft((previous) => ({ ...previous, companyName: branding().companyName }));
+      setDraft((previous) => ({
+        ...previous,
+        companyName: branding().companyName,
+      }));
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Could not save branding.");
     } finally {
@@ -3799,7 +4188,10 @@ function BrandingPage() {
                   setImageError("");
                   void resetDomainImage()
                     .then(() =>
-                      setDraft((previous) => ({ ...previous, logoUrl: branding().logoUrl })),
+                      setDraft((previous) => ({
+                        ...previous,
+                        logoUrl: branding().logoUrl,
+                      })),
                     )
                     .catch((error: unknown) =>
                       setImageError(
@@ -4004,7 +4396,10 @@ function NewPersonPage() {
               }))}
               selected={input().groups}
               onToggle={(groupId) =>
-                setInput({ ...input(), groups: toggleValue(input().groups, groupId) })
+                setInput({
+                  ...input(),
+                  groups: toggleValue(input().groups, groupId),
+                })
               }
             />
           </GlassPanel>
@@ -4036,7 +4431,10 @@ function NewPersonPage() {
               <select
                 value={input().status}
                 onChange={(event) =>
-                  setInput({ ...input(), status: event.currentTarget.value as UserStatus })
+                  setInput({
+                    ...input(),
+                    status: event.currentTarget.value as UserStatus,
+                  })
                 }
               >
                 <option value="active">Active</option>
@@ -4177,7 +4575,10 @@ function NewGroupPage() {
                 rows={3}
                 value={input().description}
                 onInput={(event) =>
-                  setInput({ ...input(), description: event.currentTarget.value })
+                  setInput({
+                    ...input(),
+                    description: event.currentTarget.value,
+                  })
                 }
               />
             </label>
@@ -4202,7 +4603,10 @@ function NewGroupPage() {
               }))}
               selected={input().members}
               onToggle={(personId) =>
-                setInput({ ...input(), members: toggleValue(input().members, personId) })
+                setInput({
+                  ...input(),
+                  members: toggleValue(input().members, personId),
+                })
               }
             />
           </GlassPanel>
@@ -4215,7 +4619,10 @@ function NewGroupPage() {
               }))}
               selected={input().parentGroups}
               onToggle={(groupId) =>
-                setInput({ ...input(), parentGroups: toggleValue(input().parentGroups, groupId) })
+                setInput({
+                  ...input(),
+                  parentGroups: toggleValue(input().parentGroups, groupId),
+                })
               }
             />
           </GlassPanel>
@@ -4353,7 +4760,11 @@ function NewApplicationPage() {
 
   async function submitApplication() {
     if (!canSubmit()) return;
-    const appInput = { ...input(), redirectUris: redirectUris(), scopeMaps: effectiveScopeMaps() };
+    const appInput = {
+      ...input(),
+      redirectUris: redirectUris(),
+      scopeMaps: effectiveScopeMaps(),
+    };
     if (!review()) {
       setReview(true);
       return;
@@ -4474,7 +4885,10 @@ function NewApplicationPage() {
                 }))}
                 selected={input().scopes}
                 onToggle={(scope) =>
-                  setInput({ ...input(), scopes: toggleValue(input().scopes, scope) })
+                  setInput({
+                    ...input(),
+                    scopes: toggleValue(input().scopes, scope),
+                  })
                 }
               />
               <Show when={extraScopes().length > 0}>
