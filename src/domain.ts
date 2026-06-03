@@ -88,6 +88,8 @@ export interface Application {
   status: "ready" | "draft" | "attention";
 }
 
+export type CreatedApplication = Application & { clientSecret?: string };
+
 export interface ApplicationScopeMap {
   groupId: string;
   scopes: string[];

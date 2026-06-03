@@ -14,6 +14,7 @@ import type {
   ApplicationPatch,
   BrandingSettings,
   ConsoleState,
+  CreatedApplication,
   CredentialUpdateIntent,
   CredentialUpdateStatus,
   DashboardConfig,
@@ -169,7 +170,7 @@ interface ConsoleContextValue {
   ) => Promise<void>;
   addGroupMembers: (name: string, members: string[]) => Promise<void>;
   removeGroupMembers: (name: string, members: string[]) => Promise<void>;
-  addApplication: (input: NewApplicationInput) => Promise<Application>;
+  addApplication: (input: NewApplicationInput) => Promise<CreatedApplication>;
   updateApplication: (appId: string, patch: ApplicationPatch) => Promise<void>;
   deleteApplication: (appId: string) => Promise<void>;
   toggleGroupMember: (groupId: string, personId: string) => Promise<void>;
@@ -1445,7 +1446,7 @@ export function ConsoleProvider(props: ParentProps) {
     });
   };
 
-  const addApplication = async (input: NewApplicationInput) => {
+  const addApplication = async (input: NewApplicationInput): Promise<CreatedApplication> => {
     if (config().dataSource.mode === "kanidm") {
       const appName = input.name.trim();
       const groupNames = new Map(state().groups.map((group) => [group.id, group.name]));
