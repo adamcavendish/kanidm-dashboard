@@ -8,6 +8,7 @@ export function CredentialCard(props: {
   icon: JSX.Element;
   action: string;
   href?: string;
+  onClick?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -18,7 +19,12 @@ export function CredentialCard(props: {
       <Show
         when={props.href && !props.disabled ? props.href : undefined}
         fallback={
-          <button class="secondary-action" type="button" disabled={props.disabled}>
+          <button
+            class="secondary-action"
+            type="button"
+            disabled={props.disabled}
+            onClick={props.onClick}
+          >
             {props.action}
           </button>
         }
