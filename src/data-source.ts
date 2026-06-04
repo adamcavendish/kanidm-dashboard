@@ -6,6 +6,8 @@ import type {
   DashboardDataSourceConfig,
   Group,
   GroupCreationResult,
+  GroupPolicyAttribute,
+  GroupUnixSettings,
   NewApplicationInput,
   NewGroupInput,
   NewPersonInput,
@@ -15,17 +17,22 @@ import type {
   PersonCreationResult,
   PersonStatusPatch,
   ProfileUpdateInput,
+  RecycleBinEntry,
+  SchemaCatalog,
+  SchemaItem,
   ServiceAccount,
   ServiceAccountApiToken,
   ServiceAccountApiTokenInput,
   ServiceAccountCredentialStatus,
   ServiceAccountPatch,
   SshPublicKey,
+  SystemConfigEntry,
   UnixAccountSettings,
   UserAuthTokenStatus,
   CredentialUpdateIntent,
   CredentialUpdateStatus,
 } from "./domain";
+import { writableSystemConfigAttrs } from "./domain";
 import { mapKanidmState, oauth2PatchEntry } from "./kanidm-mappers";
 import { Configuration } from "./generated/kanidm-sdk/runtime/runtime";
 import { SelfApi } from "./generated/kanidm-sdk/apis/SelfApi";
@@ -40,6 +47,9 @@ import { PersonUnixApi } from "./generated/kanidm-sdk/apis/PersonUnixApi";
 import { AccountApi } from "./generated/kanidm-sdk/apis/AccountApi";
 import { PersonAttrApi } from "./generated/kanidm-sdk/apis/PersonAttrApi";
 import { GroupAttrApi } from "./generated/kanidm-sdk/apis/GroupAttrApi";
+import { GroupUnixApi } from "./generated/kanidm-sdk/apis/GroupUnixApi";
+import { RecycleBinApi } from "./generated/kanidm-sdk/apis/RecycleBinApi";
+import { SystemApi } from "./generated/kanidm-sdk/apis/SystemApi";
 import { PersonCredentialApi } from "./generated/kanidm-sdk/apis/PersonCredentialApi";
 import { PersonCertificateApi } from "./generated/kanidm-sdk/apis/PersonCertificateApi";
 import { CredentialApi } from "./generated/kanidm-sdk/apis/CredentialApi";
@@ -71,6 +81,16 @@ export interface DashboardDataSource {
   ): Promise<void>;
   addGroupMembers(name: string, members: string[]): Promise<void>;
   removeGroupMembers(name: string, members: string[]): Promise<void>;
+  groupUnixSettings(id: string): Promise<GroupUnixSettings | null>;
+  extendGroupUnix(id: string, gidNumber: number): Promise<GroupUnixSettings | null>;
+  groupPolicy(id: string): Promise<GroupPolicyAttribute[]>;
+  updateGroupPolicyAttribute(id: string, attr: string, values: string[]): Promise<void>;
+  schemaCatalog(): Promise<SchemaCatalog>;
+  recycleBinEntries(): Promise<RecycleBinEntry[]>;
+  recycleBinEntry(id: string): Promise<RecycleBinEntry | null>;
+  reviveRecycleBinEntry(id: string): Promise<void>;
+  systemConfig(): Promise<SystemConfigEntry[]>;
+  updateSystemAttribute(attr: string, values: string[]): Promise<void>;
   createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount>;
   deleteServiceAccount(id: string): Promise<void>;
   updateServiceAccount(id: string, patch: ServiceAccountPatch): Promise<void>;
@@ -337,6 +357,123 @@ export class KanidmDataSource implements DashboardDataSource {
       attr: "member",
       body: members,
     });
+  }
+
+  async groupUnixSettings(id: string): Promise<GroupUnixSettings | null> {
+    try {
+      const token = await new GroupUnixApi(this.config).groupIdUnixTokenGet({ id });
+      return {
+        enabled: true,
+        gidNumber: token.gidnumber,
+        name: token.name,
+        spn: token.spn,
+        uuid: token.uuid,
+      };
+    } catch (error) {
+      if (kanidmErrorStatus(error) === 404) return null;
+      if (error instanceof Error && "response" in error) {
+        const response = (error as { response?: Response }).response;
+        const clone = response?.clone();
+        const body = clone ? await clone.text().catch(() => "") : "";
+        if (body.includes("missingclass") || body.includes("nomatchingentries")) return null;
+      }
+      throw error;
+    }
+  }
+
+  async extendGroupUnix(id: string, gidNumber: number): Promise<GroupUnixSettings | null> {
+    await new GroupUnixApi(this.config).groupIdUnixPost({
+      id,
+      body: { gidnumber: gidNumber },
+    });
+    return this.groupUnixSettings(id);
+  }
+
+  async groupPolicy(id: string): Promise<GroupPolicyAttribute[]> {
+    const api = new GroupAttrApi(this.config);
+    return Promise.all(
+      groupPolicyDefinitions.map(async (definition) => {
+        try {
+          const values = await api.groupIdAttrGet({ id, attr: definition.attr });
+          return { ...definition, values: values ?? [] };
+        } catch (error) {
+          const status = kanidmErrorStatus(error);
+          if (status && [400, 404].includes(status)) {
+            return { ...definition, values: [] };
+          }
+          throw error;
+        }
+      }),
+    );
+  }
+
+  async updateGroupPolicyAttribute(id: string, attr: string, values: string[]): Promise<void> {
+    const cleanValues = values.map((value) => value.trim()).filter(Boolean);
+    const api = new GroupAttrApi(this.config);
+    if (cleanValues.length) {
+      await api.groupIdAttrPut({ id, attr, body: cleanValues });
+    } else {
+      await api.groupIdAttrDelete({ id, attr });
+    }
+  }
+
+  async schemaCatalog(): Promise<SchemaCatalog> {
+    const [attributes, classes] = await Promise.all([
+      this.rawKanidmJson<Array<Entry | null>>("/v1/schema/attributetype"),
+      this.rawKanidmJson<Array<Entry | null>>("/v1/schema/classtype"),
+    ]);
+    return {
+      attributes: validEntries(attributes).map((entry, index) =>
+        mapSchemaItem(entry, "attribute", index),
+      ),
+      classes: validEntries(classes).map((entry, index) => mapSchemaItem(entry, "class", index)),
+    };
+  }
+
+  async recycleBinEntries(): Promise<RecycleBinEntry[]> {
+    const entries = await this.rawKanidmJson<Entry[]>("/v1/recycle_bin", { method: "GET" });
+    return entries.map(mapRecycleBinEntry);
+  }
+
+  async recycleBinEntry(id: string): Promise<RecycleBinEntry | null> {
+    const entry = await new RecycleBinApi(this.config).recycleBinIdGet({ id });
+    return entry ? mapRecycleBinEntry(entry) : null;
+  }
+
+  async reviveRecycleBinEntry(id: string): Promise<void> {
+    await new RecycleBinApi(this.config).recycleBinReviveIdPost({ id });
+  }
+
+  async systemConfig(): Promise<SystemConfigEntry[]> {
+    const entries = await new SystemApi(this.config).systemGet();
+    return entries.map(mapSystemConfigEntry);
+  }
+
+  async updateSystemAttribute(attr: string, values: string[]): Promise<void> {
+    if (!writableSystemConfigAttrs.includes(attr)) {
+      throw new Error(`System attribute ${attr} is read-only in this dashboard.`);
+    }
+    const cleanValues = values.map((value) => value.trim()).filter(Boolean);
+    const api = new SystemApi(this.config);
+    if (cleanValues.length) {
+      await api.systemAttrPut({ attr, body: cleanValues });
+    } else {
+      await api.systemAttrDelete({ attr });
+    }
+  }
+
+  private async rawKanidmJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const token = await this.config.accessToken?.();
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${this.config.basePath}${path}`, {
+      ...init,
+      credentials: this.config.credentials,
+      headers,
+    });
+    if (!response.ok) throw await kanidmHttpError(path, response);
+    return (await response.json()) as T;
   }
 
   async createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount> {
@@ -909,6 +1046,102 @@ function kanidmErrorStatus(error: unknown) {
   return undefined;
 }
 
+const groupPolicyDefinitions: Array<Omit<GroupPolicyAttribute, "values">> = [
+  {
+    attr: "authsession_expiry",
+    label: "Auth session expiry",
+    help: "Maximum ordinary authentication session lifetime.",
+  },
+  {
+    attr: "auth_password_minimum_length",
+    label: "Password minimum length",
+    help: "Minimum primary password length for accounts governed by this group.",
+  },
+  {
+    attr: "credential_type_minimum",
+    label: "Credential type minimum",
+    help: "Minimum accepted credential type, such as mfa or passkey policy levels.",
+  },
+  {
+    attr: "privilege_expiry",
+    label: "Privilege expiry",
+    help: "Maximum privileged session lifetime.",
+  },
+  {
+    attr: "webauthn_attestation_ca_list",
+    label: "WebAuthn attestation CA list",
+    help: "Trusted attestation CA list used by WebAuthn policy.",
+  },
+  {
+    attr: "allow_primary_cred_fallback",
+    label: "Primary credential fallback",
+    help: "Whether primary credential fallback is allowed by policy.",
+  },
+  {
+    attr: "limit_search_max_results",
+    label: "Search result limit",
+    help: "Maximum number of search results returned for governed accounts.",
+  },
+  {
+    attr: "limit_search_max_filter_test",
+    label: "Search filter test limit",
+    help: "Maximum search filter tests for governed accounts.",
+  },
+];
+
+function mapSchemaItem(entry: Entry, kind: SchemaItem["kind"], index: number): SchemaItem {
+  const attrs = mutableAttrs(entry.attrs);
+  const name =
+    firstAttr(attrs, "name") ||
+    firstAttr(attrs, kind === "class" ? "classname" : "attributename") ||
+    firstAttr(attrs, "attributename") ||
+    firstAttr(attrs, "classname") ||
+    `${kind}-${index}`;
+  return {
+    id: firstAttr(attrs, "uuid") || `${kind}-${name}`,
+    name,
+    displayName: firstAttr(attrs, "displayname") || name,
+    description: firstAttr(attrs, "description") || "No description returned.",
+    kind,
+    attrs,
+  };
+}
+
+function validEntries(entries: Array<Entry | null | undefined>) {
+  return entries.filter((entry): entry is Entry => Boolean(entry?.attrs));
+}
+
+function mapRecycleBinEntry(entry: Entry): RecycleBinEntry {
+  const attrs = mutableAttrs(entry.attrs);
+  const name = firstAttr(attrs, "name") || firstAttr(attrs, "spn") || firstAttr(attrs, "uuid");
+  return {
+    id: firstAttr(attrs, "uuid") || name || "recycled-entry",
+    name: name || "recycled-entry",
+    displayName: firstAttr(attrs, "displayname") || name || "Recycled entry",
+    description: firstAttr(attrs, "description") || "",
+    classes: attrs.class ?? [],
+    attrs,
+  };
+}
+
+function mapSystemConfigEntry(entry: Entry): SystemConfigEntry {
+  const attrs = mutableAttrs(entry.attrs);
+  return {
+    id: firstAttr(attrs, "uuid") || "system-config",
+    displayName: firstAttr(attrs, "displayname") || "System config",
+    description: firstAttr(attrs, "description") || "System configuration.",
+    attrs,
+  };
+}
+
+function mutableAttrs(attrs?: Record<string, readonly string[]> | null): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(attrs ?? {}).map(([key, values]) => [key, [...values]]));
+}
+
+function firstAttr(attrs: Record<string, string[]>, attr: string) {
+  return attrs[attr]?.[0] ?? "";
+}
+
 async function deletePersonAttr(api: PersonAttrApi, id: string, attr: string) {
   try {
     await api.personIdDeleteAttr({ id, attr });
@@ -1269,6 +1502,102 @@ export class MockDataSource implements DashboardDataSource {
       ),
     };
     this.persist();
+  }
+  async groupUnixSettings(id: string): Promise<GroupUnixSettings | null> {
+    const group = this.state.groups.find(
+      (candidate) => candidate.id === id || candidate.name === id,
+    );
+    if (!group || !group.name.includes("unix")) return null;
+    return {
+      enabled: true,
+      gidNumber: 2400,
+      name: group.name,
+      spn: `${group.name}@localhost`,
+      uuid: group.id,
+    };
+  }
+  async extendGroupUnix(id: string, gidNumber: number): Promise<GroupUnixSettings | null> {
+    const group = this.state.groups.find(
+      (candidate) => candidate.id === id || candidate.name === id,
+    );
+    if (!group) return null;
+    return {
+      enabled: true,
+      gidNumber,
+      name: group.name,
+      spn: `${group.name}@localhost`,
+      uuid: group.id,
+    };
+  }
+  async groupPolicy(_id: string): Promise<GroupPolicyAttribute[]> {
+    return groupPolicyDefinitions.map((definition, index) => ({
+      ...definition,
+      values: index < 3 ? [`mock-${definition.attr}`] : [],
+    }));
+  }
+  async updateGroupPolicyAttribute(_id: string, _attr: string, _values: string[]): Promise<void> {
+    return undefined;
+  }
+  async schemaCatalog(): Promise<SchemaCatalog> {
+    return {
+      attributes: [
+        {
+          id: "schema-attr-name",
+          name: "name",
+          displayName: "name",
+          description: "Unique identity name.",
+          kind: "attribute",
+          attrs: { name: ["name"], description: ["Unique identity name."] },
+        },
+      ],
+      classes: [
+        {
+          id: "schema-class-group",
+          name: "group",
+          displayName: "group",
+          description: "Kanidm group object class.",
+          kind: "class",
+          attrs: { name: ["group"], description: ["Kanidm group object class."] },
+        },
+      ],
+    };
+  }
+  async recycleBinEntries(): Promise<RecycleBinEntry[]> {
+    return [
+      {
+        id: "recycled-demo",
+        name: "deleted-demo",
+        displayName: "Deleted demo entry",
+        description: "Mock recycled entry.",
+        classes: ["object", "recycled"],
+        attrs: { name: ["deleted-demo"], class: ["object", "recycled"] },
+      },
+    ];
+  }
+  async recycleBinEntry(id: string): Promise<RecycleBinEntry | null> {
+    return (await this.recycleBinEntries()).find((entry) => entry.id === id) ?? null;
+  }
+  async reviveRecycleBinEntry(_id: string): Promise<void> {
+    return undefined;
+  }
+  async systemConfig(): Promise<SystemConfigEntry[]> {
+    return [
+      {
+        id: "mock-system",
+        displayName: "System config",
+        description: "Mock system configuration.",
+        attrs: {
+          description: ["Mock system configuration."],
+          badlist_password: ["password", "qwerty"],
+        },
+      },
+    ];
+  }
+  async updateSystemAttribute(_attr: string, _values: string[]): Promise<void> {
+    if (!writableSystemConfigAttrs.includes(_attr)) {
+      throw new Error(`System attribute ${_attr} is read-only in this dashboard.`);
+    }
+    return undefined;
   }
   async createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount> {
     const serviceAccount: ServiceAccount = {

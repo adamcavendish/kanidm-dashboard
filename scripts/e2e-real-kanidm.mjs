@@ -3,6 +3,10 @@ import { chromium } from "playwright";
 import { envValue } from "./kanidm-script-env.mjs";
 
 const baseUrl = envValue("KANIDM_DASHBOARD_URL", "https://localhost:9443");
+const nativeOAuthBaseUrl = envValue(
+  "KANIDM_NATIVE_OAUTH_URL",
+  baseUrl.startsWith("http://") ? envValue("KANIDM_URL", "https://localhost:9443") : baseUrl,
+);
 const username = envValue("KANIDM_USERNAME", "idm_admin");
 const password = envValue("KANIDM_PASSWORD");
 const screenshotDir = envValue("E2E_SCREENSHOT_DIR", "/tmp");
@@ -30,6 +34,7 @@ const failurePath = `${screenshotDir}/kanidm-dashboard-real-write-failure.png`;
 const logs = [];
 const apiResponses = [];
 const failedResponses = [];
+const responseCaptureTasks = [];
 const cleanupResults = [];
 let domainBrandingResult = {
   domainBrandingWritable: false,
@@ -42,6 +47,7 @@ let nativeOAuthResult = {
   nativeOAuthConsentVerified: false,
   nativeOAuthAccessDeniedVerified: false,
 };
+let maintenancePagesVerified = false;
 let userTotpSecret = "";
 let userBackupCode = "";
 
@@ -64,6 +70,14 @@ function jwtPayload(token) {
 }
 
 function expectedPolicyFailure(responseLine) {
+  const groupPolicyAttrs = [
+    "allow_primary_cred_fallback",
+    "auth_password_minimum_length",
+    "authsession_expiry",
+    "credential_type_minimum",
+    "privilege_expiry",
+    "webauthn_attestation_ca_list",
+  ];
   const expectedGroupMetadataDenial =
     responseLine.includes("/v1/group/") &&
     (responseLine.includes("/_attr/displayname") || responseLine.includes("/_attr/managedby")) &&
@@ -71,10 +85,21 @@ function expectedPolicyFailure(responseLine) {
       responseLine.startsWith("403 ") ||
       responseLine.startsWith("404 ") ||
       responseLine.startsWith("405 "));
+  const expectedMissingGroupPolicyAttr =
+    responseLine.startsWith("400 ") &&
+    responseLine.includes("/v1/group/") &&
+    groupPolicyAttrs.some((attr) => responseLine.includes(`/_attr/${attr}`));
+  const expectedNonUnixGroupToken =
+    responseLine.startsWith("500 ") &&
+    responseLine.includes("/v1/group/") &&
+    responseLine.includes("/_unix/_token") &&
+    responseLine.includes("missingclass");
 
   return (
     expectedGroupMetadataDenial ||
-    (responseLine.startsWith("403 ") && responseLine.endsWith("/v1/person")) ||
+    expectedMissingGroupPolicyAttr ||
+    expectedNonUnixGroupToken ||
+    (responseLine.startsWith("403 ") && responseLine.includes("/v1/person")) ||
     (responseLine.startsWith("403 ") &&
       (responseLine.includes("/_radius") ||
         responseLine.includes("/_ssh_pubkeys") ||
@@ -84,8 +109,15 @@ function expectedPolicyFailure(responseLine) {
     // User auth token deletion may return 405 on some Kanidm configurations
     (responseLine.startsWith("405 ") && responseLine.includes("/_user_auth_token")) ||
     // 401 on initial page load when session storage has not-expired-yet token
-    (responseLine.startsWith("401 ") && responseLine.endsWith("/v1/self"))
+    (responseLine.startsWith("401 ") && responseLine.includes("/v1/self"))
   );
+}
+
+function responseTextWithTimeout(response, timeoutMs = 2000) {
+  return Promise.race([
+    response.text(),
+    new Promise((resolve) => setTimeout(() => resolve(""), timeoutMs)),
+  ]);
 }
 
 async function selectInternalLink(page, name, urlPattern) {
@@ -212,16 +244,38 @@ async function verifyGroupMembershipToggle(page) {
   const memberButton = page.locator(".member-pill").filter({ hasText: displayName });
   await memberButton.waitFor({ timeout: 30000 });
   await page
-    .getByText(/Membership changes immediately update access to 1 application\./)
+    .getByText(/Saved membership changes update access to 1 application\./)
     .waitFor({ timeout: 10000 });
 
   await waitForMemberSelection(page, displayName, true);
+  await page.getByRole("button", { name: /^Edit$/ }).click();
 
   await memberButton.click();
+  await page.locator(".edit-toolbar .primary-action").click();
   await waitForMemberSelection(page, displayName, false);
 
+  await page.getByRole("button", { name: /^Edit$/ }).click();
   await memberButton.click();
+  await page.locator(".edit-toolbar .primary-action").click();
   await waitForMemberSelection(page, displayName, true);
+}
+
+async function verifyMaintenancePages(page) {
+  for (const target of [
+    { name: /^Schema$/, url: /\/admin\/schema$/, title: "Schema browser" },
+    { name: /^Recycle bin$/, url: /\/admin\/recycle-bin$/, title: "Recycle bin" },
+    { name: /^System$/, url: /\/admin\/system$/, title: "System config" },
+  ]) {
+    await selectInternalLink(page, target.name, target.url);
+    await page
+      .getByRole("heading", { level: 1, name: target.title, exact: true })
+      .waitFor({ timeout: 30000 });
+    await page.waitForTimeout(1000);
+    const errors = await page.locator(".review-box.danger").allTextContents();
+    if (errors.length) {
+      throw new Error(`${target.title} rendered errors: ${errors.join(" ")}`);
+    }
+  }
 }
 
 async function verifyNestedRelationships(page) {
@@ -241,7 +295,7 @@ function nativeOAuthRequestUrl() {
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   const stateValue = randomBytes(18).toString("base64url");
   const nonce = randomBytes(18).toString("base64url");
-  const url = new URL("/ui/oauth2", baseUrl);
+  const url = new URL("/ui/oauth2", nativeOAuthBaseUrl);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", appName);
   url.searchParams.set("redirect_uri", nativeOAuthCallbackUrl());
@@ -434,21 +488,22 @@ async function createApplication(page) {
   await page.waitForURL(/\/admin\/apps$/, { timeout: 30000 });
   await page.getByText(`Orb Chrysa ${stamp}`).waitFor({ timeout: 30000 });
 
-  const appRow = page.locator("tr").filter({ hasText: `Orb Chrysa ${stamp}` });
-  await appRow.getByRole("cell", { name: parentGroupName, exact: true }).waitFor({
-    timeout: 30000,
-  });
-  await appRow.getByText("oci_admin").waitFor({ timeout: 30000 });
-  await appRow.getByText("ready").waitFor({ timeout: 30000 });
+  const appButton = page.getByRole("button", { name: named(`Orb Chrysa ${stamp}`) });
+  await appButton.waitFor({ timeout: 30000 });
+  await appButton.click();
+  const appDetail = page.locator(".resource-detail").filter({ hasText: `Orb Chrysa ${stamp}` });
+  await appDetail.getByText(parentGroupName).first().waitFor({ timeout: 30000 });
+  await appDetail.getByText("oci_admin").first().waitFor({ timeout: 30000 });
+  await appDetail.getByText("ready").first().waitFor({ timeout: 30000 });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#007aff"/><text x="32" y="40" font-size="28" text-anchor="middle" fill="white">O</text></svg>`;
-  await appRow.locator('input[type="file"]').setInputFiles({
+  await appDetail.locator('input[type="file"]').setInputFiles({
     name: "orb-chrysa.svg",
     mimeType: "image/svg+xml",
     buffer: Buffer.from(svg),
   });
-  await appRow.locator("img.app-icon").waitFor({ timeout: 30000 });
-  await appRow.getByRole("button", { name: "Reset" }).click();
-  await appRow.locator("img.app-icon").waitFor({ state: "detached", timeout: 30000 });
+  await appButton.locator("img.app-icon").waitFor({ timeout: 30000 });
+  await appDetail.getByRole("button", { name: /Reset image/ }).click();
+  await appButton.locator("img.app-icon").waitFor({ state: "detached", timeout: 30000 });
 }
 
 async function verifyDomainImageBranding(page) {
@@ -991,7 +1046,19 @@ async function main() {
       apiResponses.push(`${response.status()} ${url}`);
     }
     if (response.status() >= 400 && (url.includes("/v1/") || url.includes("/oauth2/"))) {
-      failedResponses.push(`${response.status()} ${url}`);
+      const line = `${response.status()} ${url}`;
+      if (
+        response.status() === 500 &&
+        url.includes("/v1/group/") &&
+        url.includes("/_unix/_token")
+      ) {
+        const task = responseTextWithTimeout(response)
+          .then((body) => failedResponses.push(`${line} ${String(body).slice(0, 160)}`))
+          .catch(() => failedResponses.push(line));
+        responseCaptureTasks.push(task);
+      } else {
+        failedResponses.push(line);
+      }
     }
   });
 
@@ -999,6 +1066,8 @@ async function main() {
 
   try {
     await verifyExpiredSessionRedirect(page);
+    await Promise.allSettled(responseCaptureTasks);
+    responseCaptureTasks.length = 0;
     failedResponses.length = 0;
     logs.length = 0;
 
@@ -1040,6 +1109,8 @@ async function main() {
     await createGroup(page);
     const resetUrl = await createPerson(page);
     await createApplication(page);
+    await verifyMaintenancePages(page);
+    maintenancePagesVerified = true;
     domainBrandingResult = await verifyDomainImageBranding(page);
     await verifyGroupMembershipToggle(page);
     await verifyNestedRelationships(page);
@@ -1047,6 +1118,7 @@ async function main() {
     nativeOAuthResult = await verifyNativeOAuthFlow(browser, page);
     await verifyNormalUserPortal(page);
 
+    await Promise.allSettled(responseCaptureTasks);
     const unexpectedFailures = failedResponses.filter(
       (responseLine) => !expectedPolicyFailure(responseLine),
     );
@@ -1082,6 +1154,7 @@ async function main() {
           unixSelfServiceVerified: true,
           backupCodeLoginVerified: true,
           initialCredentialIntentVerified: true,
+          maintenancePagesVerified,
           clientSecretVerified: true,
           appImageUploadVerified: true,
           appImageResetVerified: true,

@@ -14,6 +14,8 @@ export type UserStatus = "active" | "locked" | "expiring" | "recovery";
 
 export type ClientType = "confidential" | "public";
 
+export const writableSystemConfigAttrs: readonly string[] = ["description"];
+
 export interface ThemeSettings {
   mode: ThemeMode;
   preset: ThemePreset;
@@ -135,6 +137,51 @@ export interface Group {
   members: string[];
   parentGroups: string[];
   managedBy: string;
+}
+
+export interface GroupUnixSettings {
+  enabled: boolean;
+  gidNumber: number | null;
+  name: string;
+  spn: string;
+  uuid: string;
+}
+
+export interface GroupPolicyAttribute {
+  attr: string;
+  label: string;
+  values: string[];
+  help: string;
+}
+
+export interface SchemaItem {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  kind: "attribute" | "class";
+  attrs: Record<string, string[]>;
+}
+
+export interface SchemaCatalog {
+  attributes: SchemaItem[];
+  classes: SchemaItem[];
+}
+
+export interface RecycleBinEntry {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  classes: string[];
+  attrs: Record<string, string[]>;
+}
+
+export interface SystemConfigEntry {
+  id: string;
+  displayName: string;
+  description: string;
+  attrs: Record<string, string[]>;
 }
 
 export interface Application {

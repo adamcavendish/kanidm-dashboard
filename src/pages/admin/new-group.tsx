@@ -40,7 +40,6 @@ export function NewGroupPage() {
       const result = await addGroup(input());
       setCreated(result);
       setReview(false);
-      navigate("/admin/groups");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create group.");
     } finally {
