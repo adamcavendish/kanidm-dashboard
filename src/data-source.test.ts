@@ -392,6 +392,109 @@ describe("KanidmDataSource", () => {
     }
   });
 
+  it("uses Kanidm OAuth2 policy endpoints", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      calls.push({
+        url: requestUrl,
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+      if (requestUrl.endsWith("/v1/oauth2/grafana") && (init?.method ?? "GET") === "GET") {
+        return new Response(
+          JSON.stringify({
+            attrs: {
+              oauth2_rs_scope_map: ['old_group@localhost: {"openid"}'],
+              oauth2_rs_sup_scope_map: ['old_group@localhost: {"legacy"}'],
+              oauth2_rs_claim_map: ['roles:old_group@localhost:;:"legacy"'],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/oauth2/grafana/_basic_secret")) {
+        return new Response(JSON.stringify("secret-test"), { status: 200 });
+      }
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+      await expect(ds.getOAuth2ApplicationClientSecret("grafana")).resolves.toBe("secret-test");
+      await ds.updateOAuth2ApplicationPolicy("grafana", {
+        scopeMaps: [{ groupId: "idm_admins", scopes: ["openid", "profile"] }],
+        supplementalScopeMaps: [{ groupId: "idm_admins", scopes: ["audit"] }],
+        claimMaps: [
+          {
+            claimName: "roles",
+            join: "array",
+            rules: [{ groupId: "idm_admins", values: ["admin", "owner"] }],
+          },
+          {
+            claimName: "teams",
+            join: "csv",
+            rules: [{ groupId: "idm_oauth2_admins", values: ["dev", "ops"] }],
+          },
+          {
+            claimName: "permissions",
+            join: "ssv",
+            rules: [{ groupId: "idm_group_admins", values: ["read", "write"] }],
+          },
+        ],
+      });
+
+      const findCall = (method: string, path: string) =>
+        calls.find((call) => call.method === method && call.url.endsWith(path));
+
+      expect(calls.some((call) => call.url.endsWith("/_basic_secret"))).toBe(true);
+      expect(
+        calls.some((call) => call.method === "DELETE" && call.url.includes("_scopemap/old_group")),
+      ).toBe(true);
+      expect(findCall("POST", "/v1/oauth2/grafana/_scopemap/idm_admins")?.body).toBe(
+        JSON.stringify(["openid", "profile"]),
+      );
+      expect(
+        calls.some(
+          (call) => call.method === "DELETE" && call.url.includes("_sup_scopemap/old_group"),
+        ),
+      ).toBe(true);
+      expect(findCall("POST", "/v1/oauth2/grafana/_sup_scopemap/idm_admins")?.body).toBe(
+        JSON.stringify(["audit"]),
+      );
+      expect(
+        calls.some(
+          (call) => call.method === "DELETE" && call.url.includes("_claimmap/roles/old_group"),
+        ),
+      ).toBe(true);
+      expect(findCall("POST", "/v1/oauth2/grafana/_claimmap/roles")?.body).toBe(
+        JSON.stringify("array"),
+      );
+      expect(findCall("POST", "/v1/oauth2/grafana/_claimmap/roles/idm_admins")?.body).toBe(
+        JSON.stringify(["admin", "owner"]),
+      );
+      expect(findCall("POST", "/v1/oauth2/grafana/_claimmap/teams")?.body).toBe(
+        JSON.stringify("csv"),
+      );
+      expect(findCall("POST", "/v1/oauth2/grafana/_claimmap/teams/idm_oauth2_admins")?.body).toBe(
+        JSON.stringify(["dev", "ops"]),
+      );
+      expect(findCall("POST", "/v1/oauth2/grafana/_claimmap/permissions")?.body).toBe(
+        JSON.stringify("ssv"),
+      );
+      expect(
+        findCall("POST", "/v1/oauth2/grafana/_claimmap/permissions/idm_group_admins")?.body,
+      ).toBe(JSON.stringify(["read", "write"]));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("does not fail global load when service account list is denied", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url) => {

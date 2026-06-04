@@ -1333,6 +1333,36 @@ td small {
   align-items: start;
 }
 
+.claim-map-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.claim-map-form .secondary-action {
+  min-height: 42px;
+}
+
+.claim-map-row {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.removable-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.removable-chip:hover {
+  border-color: color-mix(in srgb, var(--danger) 56%, var(--line));
+  color: var(--danger);
+}
+
 .custom-scope-row .secondary-action {
   min-height: 40px;
 }

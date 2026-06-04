@@ -148,6 +148,8 @@ export interface Application {
   allowedGroups: string[];
   scopes: string[];
   scopeMaps?: ApplicationScopeMap[];
+  supplementalScopeMaps?: ApplicationScopeMap[];
+  claimMaps?: ApplicationClaimMap[];
   status: "ready" | "draft" | "attention";
 }
 
@@ -156,6 +158,25 @@ export type CreatedApplication = Application & { clientSecret?: string };
 export interface ApplicationScopeMap {
   groupId: string;
   scopes: string[];
+}
+
+export type ApplicationClaimMapJoin = "csv" | "ssv" | "array";
+
+export interface ApplicationClaimMapRule {
+  groupId: string;
+  values: string[];
+}
+
+export interface ApplicationClaimMap {
+  claimName: string;
+  join: ApplicationClaimMapJoin;
+  rules: ApplicationClaimMapRule[];
+}
+
+export interface ApplicationPolicyInput {
+  scopeMaps: ApplicationScopeMap[];
+  supplementalScopeMaps: ApplicationScopeMap[];
+  claimMaps: ApplicationClaimMap[];
 }
 
 export interface AccessPath {

@@ -119,6 +119,12 @@ describe("relationship helpers", () => {
             displayname: ["Orb Chrysa"],
             oauth2_rs_origin_landing: ["http://localhost:5050/"],
             oauth2_rs_scope_map: ['registry_parent@localhost: {"openid", "oci_pull"}'],
+            oauth2_rs_sup_scope_map: ['registry_child@localhost: {"oci_push"}'],
+            oauth2_rs_claim_map: [
+              'roles:registry_child@localhost:;:"admin,owner"',
+              'teams:registry_parent@localhost:,:"dev,ops"',
+              'permissions:registry_child@localhost: :"read,write"',
+            ],
           },
         },
       ],
@@ -130,6 +136,26 @@ describe("relationship helpers", () => {
       "group-parent",
     );
     expect(state.apps[0]?.allowedGroups).toEqual(["group-parent"]);
+    expect(state.apps[0]?.supplementalScopeMaps).toEqual([
+      { groupId: "group-child", scopes: ["oci_push"] },
+    ]);
+    expect(state.apps[0]?.claimMaps).toEqual([
+      {
+        claimName: "roles",
+        join: "array",
+        rules: [{ groupId: "group-child", values: ["admin", "owner"] }],
+      },
+      {
+        claimName: "teams",
+        join: "csv",
+        rules: [{ groupId: "group-parent", values: ["dev", "ops"] }],
+      },
+      {
+        claimName: "permissions",
+        join: "ssv",
+        rules: [{ groupId: "group-child", values: ["read", "write"] }],
+      },
+    ]);
   });
 
   it("maps direct memberships without treating every available group as selected", () => {

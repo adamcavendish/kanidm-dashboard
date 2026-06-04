@@ -1,5 +1,7 @@
 import type {
   Application,
+  ApplicationClaimMap,
+  ApplicationClaimMapJoin,
   ApplicationPatch,
   ConsoleState,
   CredentialUpdateStatus,
@@ -691,8 +693,20 @@ function mapApplication(entry: KanidmEntry, groups: Group[]): Application {
       scopes: scopeMap.scopes.length ? scopeMap.scopes : ["openid", "profile"],
     };
   });
+  const supplementalScopeMaps = values(entry, "oauth2_rs_sup_scope_map").map((value) => {
+    const scopeMap = parseScopeMap(value);
+    const group = groups.find((candidate) => groupMatchesRef(candidate, scopeMap.groupRef));
+    return {
+      groupId: group?.id ?? scopeMap.groupRef,
+      scopes: scopeMap.scopes,
+    };
+  });
+  const claimMaps = parseClaimMaps(values(entry, "oauth2_rs_claim_map"), groups);
   const allowedGroups = unique(scopeMaps.map((scopeMap) => scopeMap.groupId));
-  const scopes = unique(scopeMaps.flatMap((scopeMap) => scopeMap.scopes));
+  const scopes = unique([
+    ...scopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+    ...supplementalScopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+  ]);
 
   return {
     id: attr(entry, "uuid") || `app-${name}`,
@@ -705,6 +719,8 @@ function mapApplication(entry: KanidmEntry, groups: Group[]): Application {
     allowedGroups,
     scopes: scopes.length ? scopes : ["openid", "profile"],
     scopeMaps,
+    supplementalScopeMaps,
+    claimMaps,
     status: allowedGroups.length ? "ready" : "attention",
   };
 }
@@ -822,6 +838,48 @@ function parseScopeMap(value: string) {
         .map((match) => match[1] ?? match[2] ?? "")
         .filter((scope) => scope && scope !== "{" && scope !== "}"),
     ),
+  };
+}
+
+function parseClaimMaps(values: string[], groups: Group[]): ApplicationClaimMap[] {
+  const byClaim = new Map<string, ApplicationClaimMap>();
+  for (const value of values) {
+    const parsed = parseClaimMap(value);
+    if (!parsed) continue;
+    const group = groups.find((candidate) => groupMatchesRef(candidate, parsed.groupRef));
+    const groupId = group?.id ?? parsed.groupRef;
+    const existing = byClaim.get(parsed.claimName);
+    if (existing) {
+      existing.rules.push({ groupId, values: parsed.values });
+      existing.join = parsed.join;
+    } else {
+      byClaim.set(parsed.claimName, {
+        claimName: parsed.claimName,
+        join: parsed.join,
+        rules: [{ groupId, values: parsed.values }],
+      });
+    }
+  }
+  return [...byClaim.values()];
+}
+
+function parseClaimMap(value: string): {
+  claimName: string;
+  groupRef: string;
+  join: ApplicationClaimMapJoin;
+  values: string[];
+} | null {
+  const match = value.match(/^([^:]+):([^:]+):(;|,| ):"(.*)"$/s);
+  if (!match) return null;
+  const [, claimName = "", rawGroupRef = "", joinToken = ";", rawValues = ""] = match;
+  return {
+    claimName: claimName.trim(),
+    groupRef: normalizeRef(rawGroupRef),
+    join: joinToken === "," ? "csv" : joinToken === " " ? "ssv" : "array",
+    values: rawValues
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
   };
 }
 
