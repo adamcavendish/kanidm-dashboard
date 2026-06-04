@@ -1,8 +1,13 @@
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { Check, CircleAlert, Plus, Trash2, Upload } from "lucide-solid";
-import type { Application, ApplicationPatch, ApplicationScopeMap } from "../../domain";
+import type {
+  Application,
+  ApplicationClaimMapJoin,
+  ApplicationPatch,
+  ApplicationPolicyInput,
+  ApplicationScopeMap,
+} from "../../domain";
 import { useConsole } from "../../store";
-import { KanidmDataSource } from "../../data-source";
 import AppIcon from "../../components/app-icon";
 import ErrorBox from "../../components/error-box";
 import GlassPanel from "../../components/glass-panel";
@@ -18,8 +23,15 @@ import { validateKanidmImageFile } from "../../utils/image-validation";
 import { labelForGroup } from "../../utils/labels";
 import { searchable } from "../../utils/search";
 export function ApplicationsPage() {
-  const { state, config, uploadAppImage, resetAppImage, updateApplication, deleteApplication } =
-    useConsole();
+  const {
+    state,
+    uploadAppImage,
+    resetAppImage,
+    updateApplication,
+    updateApplicationPolicy,
+    getApplicationClientSecret,
+    deleteApplication,
+  } = useConsole();
   const { navigate } = useNavigation();
   const [query, setQuery] = createSignal("");
   const [selectedAppId, setSelectedAppId] = createSignal(state().apps[0]?.id ?? "");
@@ -28,6 +40,10 @@ export function ApplicationsPage() {
   const [editRedirectText, setEditRedirectText] = createSignal("");
   const [editAllowedGroups, setEditAllowedGroups] = createSignal<string[]>([]);
   const [editScopeMaps, setEditScopeMaps] = createSignal<ApplicationScopeMap[]>([]);
+  const [editSupplementalScopeMaps, setEditSupplementalScopeMaps] = createSignal<
+    ApplicationScopeMap[]
+  >([]);
+  const [editClaimMaps, setEditClaimMaps] = createSignal<ApplicationPolicyInput["claimMaps"]>([]);
   const [editing, setEditing] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
@@ -35,6 +51,14 @@ export function ApplicationsPage() {
   const [imageBusy, setImageBusy] = createSignal(false);
   const [imageError, setImageError] = createSignal("");
   const [customScope, setCustomScope] = createSignal("");
+  const [customSupplementalScope, setCustomSupplementalScope] = createSignal("");
+  const [claimName, setClaimName] = createSignal("roles");
+  const [claimGroupId, setClaimGroupId] = createSignal("");
+  const [claimValues, setClaimValues] = createSignal("");
+  const [claimJoin, setClaimJoin] = createSignal<ApplicationClaimMapJoin>("array");
+  const [clientSecret, setClientSecret] = createSignal("");
+  const [secretBusy, setSecretBusy] = createSignal(false);
+  const [secretError, setSecretError] = createSignal("");
 
   const apps = () => state().apps.filter((app) => searchable(app).includes(query().toLowerCase()));
   const selectedApp = () =>
@@ -48,6 +72,19 @@ export function ApplicationsPage() {
 
   const scopesForEditingGroup = (groupId: string) =>
     editScopeMaps().find((sm) => sm.groupId === groupId)?.scopes ?? [];
+
+  const supplementalScopesForEditingGroup = (groupId: string) =>
+    editSupplementalScopeMaps().find((sm) => sm.groupId === groupId)?.scopes ?? [];
+
+  const policyChanged = (app: Application, policy: ApplicationPolicyInput) =>
+    JSON.stringify(policy) !==
+    JSON.stringify(
+      normalizePolicyInput(
+        app.scopeMaps ?? [],
+        app.supplementalScopeMaps ?? [],
+        app.claimMaps ?? [],
+      ),
+    );
 
   const extraScopes = () => {
     const seen = new Set(standardScopes);
@@ -71,10 +108,15 @@ export function ApplicationsPage() {
       setEditRedirectText(app.redirectUris.join("\n"));
       setEditAllowedGroups([...app.allowedGroups]);
       setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
+      setEditSupplementalScopeMaps(structuredClone(app.supplementalScopeMaps ?? []));
+      setEditClaimMaps(structuredClone(app.claimMaps ?? []));
       setEditing(false);
       setDeleting(false);
       setError("");
       setImageError("");
+      setSecretError("");
+      setClientSecret("");
+      setClaimGroupId(app.allowedGroups[0] ?? "");
     }
   });
 
@@ -118,6 +160,9 @@ export function ApplicationsPage() {
     const nextGroups = toggleValue(editAllowedGroups(), groupId);
     setEditAllowedGroups(nextGroups);
     setEditScopeMaps(editScopeMaps().filter((sm) => nextGroups.includes(sm.groupId)));
+    setEditSupplementalScopeMaps(
+      editSupplementalScopeMaps().filter((sm) => nextGroups.includes(sm.groupId)),
+    );
   }
 
   function toggleGroupScope(groupId: string, scope: string) {
@@ -139,6 +184,90 @@ export function ApplicationsPage() {
     if (!scope) return;
     toggleGroupScope(groupId, scope);
     setCustomScope("");
+  }
+
+  function toggleSupplementalScope(groupId: string, scope: string) {
+    const currentScopes = supplementalScopesForEditingGroup(groupId);
+    const nextScopes = toggleValue(currentScopes, scope);
+    const existing = editSupplementalScopeMaps().find((sm) => sm.groupId === groupId);
+    if (existing) {
+      setEditSupplementalScopeMaps(
+        editSupplementalScopeMaps()
+          .map((sm) => (sm.groupId === groupId ? { ...sm, scopes: nextScopes } : sm))
+          .filter((sm) => sm.scopes.length > 0),
+      );
+    } else if (nextScopes.length) {
+      setEditSupplementalScopeMaps([
+        ...editSupplementalScopeMaps(),
+        { groupId, scopes: nextScopes },
+      ]);
+    }
+  }
+
+  function addCustomSupplementalScopeToGroup(groupId: string) {
+    const scope = customSupplementalScope().trim();
+    if (!scope) return;
+    toggleSupplementalScope(groupId, scope);
+    setCustomSupplementalScope("");
+  }
+
+  function upsertClaimRule() {
+    const name = claimName().trim();
+    const groupId = claimGroupId() || editAllowedGroups()[0] || state().groups[0]?.id || "";
+    const values = claimValues()
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!name || !groupId || !values.length) return;
+    const existing = editClaimMaps().find((claimMap) => claimMap.claimName === name);
+    if (existing) {
+      setEditClaimMaps(
+        editClaimMaps().map((claimMap) =>
+          claimMap.claimName === name
+            ? {
+                ...claimMap,
+                join: claimJoin(),
+                rules: [
+                  ...claimMap.rules.filter((rule) => rule.groupId !== groupId),
+                  { groupId, values },
+                ],
+              }
+            : claimMap,
+        ),
+      );
+    } else {
+      setEditClaimMaps([
+        ...editClaimMaps(),
+        { claimName: name, join: claimJoin(), rules: [{ groupId, values }] },
+      ]);
+    }
+    setClaimValues("");
+  }
+
+  function removeClaimRule(claimName: string, groupId: string) {
+    setEditClaimMaps(
+      editClaimMaps()
+        .map((claimMap) =>
+          claimMap.claimName === claimName
+            ? { ...claimMap, rules: claimMap.rules.filter((rule) => rule.groupId !== groupId) }
+            : claimMap,
+        )
+        .filter((claimMap) => claimMap.rules.length > 0),
+    );
+  }
+
+  async function revealClientSecret(app: Application) {
+    setSecretBusy(true);
+    setSecretError("");
+    setClientSecret("");
+    try {
+      const secret = await getApplicationClientSecret(app.id);
+      setClientSecret(secret ?? "No secret returned.");
+    } catch (err) {
+      setSecretError(err instanceof Error ? err.message : "Could not reveal client secret.");
+    } finally {
+      setSecretBusy(false);
+    }
   }
 
   return (
@@ -252,6 +381,47 @@ export function ApplicationsPage() {
                       </For>
                     </div>
                   </Show>
+                  <Show when={selectedApp()?.supplementalScopeMaps?.length}>
+                    <div class="scope-map-summary">
+                      <h4>Supplemental scope maps</h4>
+                      <For each={selectedApp()?.supplementalScopeMaps ?? []}>
+                        {(scopeMap) => (
+                          <div class="scope-map-summary-row">
+                            <strong>{labelForGroup(state().groups, scopeMap.groupId)}</strong>
+                            <div class="chip-row">
+                              <For each={scopeMap.scopes}>
+                                {(scope) => <span class="chip">{scope}</span>}
+                              </For>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={selectedApp()?.claimMaps?.length}>
+                    <div class="scope-map-summary">
+                      <h4>Claim maps</h4>
+                      <For each={selectedApp()?.claimMaps ?? []}>
+                        {(claimMap) => (
+                          <div class="scope-map-summary-row">
+                            <strong>
+                              {claimMap.claimName} ({claimMap.join})
+                            </strong>
+                            <div class="chip-row">
+                              <For each={claimMap.rules}>
+                                {(rule) => (
+                                  <span class="chip">
+                                    {labelForGroup(state().groups, rule.groupId)}:{" "}
+                                    {rule.values.join(", ")}
+                                  </span>
+                                )}
+                              </For>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
                   <div class="detail-actions">
                     <div class="detail-action-row image-action-row">
                       <label class="file-button compact-file">
@@ -290,6 +460,19 @@ export function ApplicationsPage() {
                       >
                         Edit
                       </button>
+                      <Show when={selectedApp()?.clientType === "confidential"}>
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          disabled={secretBusy()}
+                          onClick={() => {
+                            const app = selectedApp();
+                            if (app) void revealClientSecret(app);
+                          }}
+                        >
+                          {secretBusy() ? "Reading…" : "Reveal secret"}
+                        </button>
+                      </Show>
                       <Show when={!deleting()}>
                         <button
                           class="danger-action"
@@ -334,6 +517,12 @@ export function ApplicationsPage() {
                         </button>
                       </Show>
                     </div>
+                    <Show when={clientSecret()}>
+                      <div class="secret-display">
+                        <span>{clientSecret()}</span>
+                      </div>
+                    </Show>
+                    <ErrorBox error={secretError} />
                   </div>
                 </>
               }
@@ -454,6 +643,129 @@ export function ApplicationsPage() {
           </Show>
 
           <Show when={editing()}>
+            <GlassPanel title="Supplemental scopes">
+              <Show
+                when={editAllowedGroups().length > 0}
+                fallback={
+                  <p class="muted">Select an access group before adding supplemental scopes.</p>
+                }
+              >
+                <For each={editAllowedGroups()}>
+                  {(groupId) => (
+                    <div class="scope-map-editor">
+                      <strong>{labelForGroup(state().groups, groupId)}</strong>
+                      <div class="scope-toggle-row">
+                        <For each={[...standardScopes, ...extraScopes()]}>
+                          {(scope) => {
+                            const active = () =>
+                              supplementalScopesForEditingGroup(groupId).includes(scope);
+                            return (
+                              <button
+                                class={active() ? "scope-toggle selected" : "scope-toggle"}
+                                type="button"
+                                onClick={() => toggleSupplementalScope(groupId, scope)}
+                              >
+                                {scope}
+                              </button>
+                            );
+                          }}
+                        </For>
+                      </div>
+                      <div class="custom-scope-row">
+                        <input
+                          type="text"
+                          placeholder="Supplemental scope"
+                          value={customSupplementalScope()}
+                          onInput={(e) => setCustomSupplementalScope(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addCustomSupplementalScopeToGroup(groupId);
+                            }
+                          }}
+                        />
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          onClick={() => addCustomSupplementalScopeToGroup(groupId)}
+                        >
+                          <Plus size={14} /> Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </GlassPanel>
+          </Show>
+
+          <Show when={editing()}>
+            <GlassPanel title="Claim maps">
+              <div class="claim-map-form">
+                <TextField label="Claim name" value={claimName()} onInput={setClaimName} />
+                <label>
+                  Group
+                  <select
+                    value={claimGroupId() || editAllowedGroups()[0] || ""}
+                    onInput={(event) => setClaimGroupId(event.currentTarget.value)}
+                  >
+                    <For each={state().groups}>
+                      {(group) => <option value={group.id}>{group.displayName}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label>
+                  Join
+                  <select
+                    value={claimJoin()}
+                    onInput={(event) =>
+                      setClaimJoin(event.currentTarget.value as ApplicationClaimMapJoin)
+                    }
+                  >
+                    <option value="array">Array</option>
+                    <option value="csv">CSV</option>
+                    <option value="ssv">Space-separated</option>
+                  </select>
+                </label>
+                <label>
+                  Claim values
+                  <input
+                    type="text"
+                    value={claimValues()}
+                    onInput={(event) => setClaimValues(event.currentTarget.value)}
+                    placeholder="admin, owner"
+                  />
+                </label>
+                <button class="secondary-action" type="button" onClick={upsertClaimRule}>
+                  <Plus size={14} /> Add claim rule
+                </button>
+              </div>
+              <For each={editClaimMaps()} fallback={<p class="muted">No claim maps configured.</p>}>
+                {(claimMap) => (
+                  <div class="scope-map-summary-row claim-map-row">
+                    <strong>
+                      {claimMap.claimName} ({claimMap.join})
+                    </strong>
+                    <div class="chip-row">
+                      <For each={claimMap.rules}>
+                        {(rule) => (
+                          <button
+                            class="chip removable-chip"
+                            type="button"
+                            onClick={() => removeClaimRule(claimMap.claimName, rule.groupId)}
+                          >
+                            {labelForGroup(state().groups, rule.groupId)}: {rule.values.join(", ")}
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </GlassPanel>
+          </Show>
+
+          <Show when={editing()}>
             <div class="edit-toolbar">
               <button
                 class="primary-action"
@@ -480,45 +792,19 @@ export function ApplicationsPage() {
                     if (redirectsChanged) {
                       patch.redirectUris = newRedirectUris;
                     }
+                    const nextPolicy = normalizePolicyInput(
+                      editScopeMaps(),
+                      editSupplementalScopeMaps(),
+                      editClaimMaps(),
+                    );
+                    const shouldUpdatePolicy = policyChanged(app, nextPolicy);
 
                     if (Object.keys(patch).length > 0) {
                       await updateApplication(app.id, patch);
                     }
 
-                    // Handle scope map changes (Kanidm mode only)
-                    if (config().dataSource.mode === "kanidm") {
-                      const nextGroupIds = new Set(editAllowedGroups());
-                      const groupNames = new Map(state().groups.map((g) => [g.id, g.name]));
-
-                      const ds = new KanidmDataSource(
-                        config().dataSource,
-                        sessionStorage.getItem("kanidm-dashboard-kanidm-token") ?? undefined,
-                      );
-
-                      // Remove scope maps for deselected groups
-                      for (const removed of app.allowedGroups) {
-                        if (!nextGroupIds.has(removed)) {
-                          const groupName = groupNames.get(removed) ?? removed;
-                          await ds.deleteOAuth2ApplicationScopeMap(app.name, groupName);
-                        }
-                      }
-
-                      // Add/update scope maps for selected groups
-                      for (const groupId of editAllowedGroups()) {
-                        const groupName = groupNames.get(groupId) ?? groupId;
-                        const editSM = editScopeMaps().find((sm) => sm.groupId === groupId);
-                        const origSM = app.scopeMaps?.find((sm) => sm.groupId === groupId);
-                        const newScopes = editSM?.scopes ?? [];
-                        const oldScopes = origSM?.scopes ?? [];
-
-                        const scopesChanged =
-                          newScopes.length !== oldScopes.length ||
-                          newScopes.some((s, i) => s !== oldScopes[i]);
-
-                        if (!origSM || scopesChanged) {
-                          await ds.updateOAuth2ApplicationScopeMap(app.name, groupName, newScopes);
-                        }
-                      }
+                    if (shouldUpdatePolicy) {
+                      await updateApplicationPolicy(app.id, nextPolicy);
                     }
 
                     setEditing(false);
@@ -544,6 +830,8 @@ export function ApplicationsPage() {
                     setEditRedirectText(app.redirectUris.join("\n"));
                     setEditAllowedGroups([...app.allowedGroups]);
                     setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
+                    setEditSupplementalScopeMaps(structuredClone(app.supplementalScopeMaps ?? []));
+                    setEditClaimMaps(structuredClone(app.claimMaps ?? []));
                   }
                 }}
               >
@@ -555,4 +843,39 @@ export function ApplicationsPage() {
       </div>
     </>
   );
+}
+
+function normalizePolicyInput(
+  scopeMaps: ApplicationScopeMap[],
+  supplementalScopeMaps: ApplicationScopeMap[],
+  claimMaps: ApplicationPolicyInput["claimMaps"],
+): ApplicationPolicyInput {
+  return {
+    scopeMaps: normalizeScopeMaps(scopeMaps),
+    supplementalScopeMaps: normalizeScopeMaps(supplementalScopeMaps),
+    claimMaps: claimMaps
+      .map((claimMap) => ({
+        claimName: claimMap.claimName.trim(),
+        join: claimMap.join,
+        rules: claimMap.rules
+          .map((rule) => ({
+            groupId: rule.groupId,
+            values: [...new Set(rule.values.map((value) => value.trim()).filter(Boolean))],
+          }))
+          .filter((rule) => rule.groupId && rule.values.length)
+          .sort((left, right) => left.groupId.localeCompare(right.groupId)),
+      }))
+      .filter((claimMap) => claimMap.claimName && claimMap.rules.length)
+      .sort((left, right) => left.claimName.localeCompare(right.claimName)),
+  };
+}
+
+function normalizeScopeMaps(scopeMaps: ApplicationScopeMap[]) {
+  return scopeMaps
+    .map((scopeMap) => ({
+      groupId: scopeMap.groupId,
+      scopes: [...new Set(scopeMap.scopes.map((scope) => scope.trim()).filter(Boolean))].sort(),
+    }))
+    .filter((scopeMap) => scopeMap.groupId && scopeMap.scopes.length)
+    .sort((left, right) => left.groupId.localeCompare(right.groupId));
 }

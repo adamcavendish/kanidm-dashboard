@@ -1,6 +1,7 @@
 import type {
   Application,
   ApplicationPatch,
+  ApplicationPolicyInput,
   ConsoleState,
   DashboardDataSourceConfig,
   Group,
@@ -94,6 +95,8 @@ export interface DashboardDataSource {
     scopes: string[],
   ): Promise<void>;
   deleteOAuth2ApplicationScopeMap(appName: string, groupName: string): Promise<void>;
+  getOAuth2ApplicationClientSecret(appName: string): Promise<string | null>;
+  updateOAuth2ApplicationPolicy(appName: string, input: ApplicationPolicyInput): Promise<void>;
   uploadOAuth2ApplicationImage(appName: string, file: File): Promise<void>;
   deleteOAuth2ApplicationImage(appName: string): Promise<void>;
   radiusPassword(id: string): Promise<string | null>;
@@ -528,6 +531,76 @@ export class KanidmDataSource implements DashboardDataSource {
     });
   }
 
+  async getOAuth2ApplicationClientSecret(appName: string): Promise<string | null> {
+    return new Oauth2Api(this.config).oauth2IdGetBasicSecret({ rsName: appName });
+  }
+
+  async updateOAuth2ApplicationPolicy(
+    appName: string,
+    input: ApplicationPolicyInput,
+  ): Promise<void> {
+    const api = new Oauth2Api(this.config);
+    const entry = await api.oauth2IdGet({ rsName: appName });
+    const attrs = entry?.attrs ?? {};
+
+    await syncOAuth2ScopeMaps(
+      mapGroupsFromAttrs(attrs.oauth2_rs_scope_map ?? []),
+      input.scopeMaps,
+      (group) => api.oauth2IdScopemapDelete({ rsName: appName, group }),
+      (group, scopes) => api.oauth2IdScopemapPost({ rsName: appName, group, body: scopes }),
+    );
+
+    await syncOAuth2ScopeMaps(
+      mapGroupsFromAttrs(attrs.oauth2_rs_sup_scope_map ?? []),
+      input.supplementalScopeMaps,
+      (group) => api.oauth2IdSupScopemapDelete({ rsName: appName, group }),
+      (group, scopes) => api.oauth2IdSupScopemapPost({ rsName: appName, group, body: scopes }),
+    );
+
+    const existingClaimRules = claimRulesFromAttrs(attrs.oauth2_rs_claim_map ?? []);
+    const nextClaimRules = input.claimMaps.flatMap((claimMap) =>
+      claimMap.rules.map((rule) => ({
+        claimName: claimMap.claimName.trim(),
+        group: normalizeKanidmRef(rule.groupId),
+        values: rule.values.map((value) => value.trim()).filter(Boolean),
+      })),
+    );
+    const nextClaimKeys = new Set(
+      nextClaimRules.map((rule) => claimRuleKey(rule.claimName, rule.group)),
+    );
+    await Promise.all(
+      existingClaimRules
+        .filter((rule) => !nextClaimKeys.has(claimRuleKey(rule.claimName, rule.group)))
+        .map((rule) =>
+          api.oauth2IdClaimmapDelete({
+            rsName: appName,
+            claimName: rule.claimName,
+            group: rule.group,
+          }),
+        ),
+    );
+    for (const claimMap of input.claimMaps) {
+      const claimName = claimMap.claimName.trim();
+      if (!claimName) continue;
+      await api.oauth2IdClaimmapJoinPost({
+        rsName: appName,
+        claimName,
+        body: claimMap.join,
+      });
+      for (const rule of claimMap.rules) {
+        const group = normalizeKanidmRef(rule.groupId);
+        const values = rule.values.map((value) => value.trim()).filter(Boolean);
+        if (!group || !values.length) continue;
+        await api.oauth2IdClaimmapPost({
+          rsName: appName,
+          claimName,
+          group,
+          body: values,
+        });
+      }
+    }
+  }
+
   private async uploadImage(path: string, file: File): Promise<void> {
     const form = new FormData();
     form.append("file", file);
@@ -887,6 +960,63 @@ async function deleteServiceAccountAttr(api: ServiceAccountApi, id: string, attr
     if (kanidmErrorStatus(error) === 404) return;
     throw error;
   }
+}
+
+function mapGroupsFromAttrs(values: readonly string[]) {
+  return new Set(values.map((value) => normalizeKanidmRef(value.split(/:(.*)/s)[0] ?? "")));
+}
+
+async function syncOAuth2ScopeMaps(
+  existingGroups: Set<string>,
+  nextMaps: Array<{ groupId: string; scopes: string[] }>,
+  deleteMap: (group: string) => Promise<void>,
+  upsertMap: (group: string, scopes: string[]) => Promise<void>,
+) {
+  const next = nextMaps
+    .map((scopeMap) => ({
+      group: normalizeKanidmRef(scopeMap.groupId),
+      scopes: scopeMap.scopes.map((scope) => scope.trim()).filter(Boolean),
+    }))
+    .filter((scopeMap) => scopeMap.group && scopeMap.scopes.length);
+  const nextGroups = new Set(next.map((scopeMap) => scopeMap.group));
+  await Promise.all(
+    [...existingGroups].filter((group) => !nextGroups.has(group)).map((group) => deleteMap(group)),
+  );
+  for (const scopeMap of next) {
+    await upsertMap(scopeMap.group, scopeMap.scopes);
+  }
+}
+
+function claimRulesFromAttrs(values: readonly string[]) {
+  return values
+    .map((value) => {
+      const match = value.match(/^([^:]+):([^:]+):/);
+      if (!match) return null;
+      return {
+        claimName: match[1] ?? "",
+        group: normalizeKanidmRef(match[2] ?? ""),
+      };
+    })
+    .filter((value): value is { claimName: string; group: string } =>
+      Boolean(value?.claimName && value.group),
+    );
+}
+
+function claimRuleKey(claimName: string, group: string) {
+  return `${claimName}\u0000${group}`;
+}
+
+function normalizeKanidmRef(value: string) {
+  return value.trim().replace(/@[^:@\s]+$/, "");
+}
+
+function normalizedPolicyScopeMaps(scopeMaps: Array<{ groupId: string; scopes: string[] }>) {
+  return scopeMaps
+    .map((scopeMap) => ({
+      groupId: scopeMap.groupId.trim(),
+      scopes: [...new Set(scopeMap.scopes.map((scope) => scope.trim()).filter(Boolean))],
+    }))
+    .filter((scopeMap) => scopeMap.groupId && scopeMap.scopes.length);
 }
 
 import { initialState, seedPeople } from "./seed";
@@ -1389,6 +1519,39 @@ export class MockDataSource implements DashboardDataSource {
           allowedGroups,
           scopes: allScopes.length ? allScopes : ["openid", "profile"],
           status: allowedGroups.length ? "ready" : "attention",
+        };
+      }),
+    };
+    this.persist();
+  }
+  async getOAuth2ApplicationClientSecret(appName: string): Promise<string | null> {
+    const app = this.state.apps.find((candidate) => candidate.name === appName);
+    return app?.clientType === "confidential" ? `mock-secret-${appName}` : null;
+  }
+  async updateOAuth2ApplicationPolicy(
+    appName: string,
+    input: ApplicationPolicyInput,
+  ): Promise<void> {
+    this.state = {
+      ...this.state,
+      apps: this.state.apps.map((app) => {
+        if (app.name !== appName) return app;
+        const scopeMaps = normalizedPolicyScopeMaps(input.scopeMaps);
+        const supplementalScopeMaps = normalizedPolicyScopeMaps(input.supplementalScopeMaps);
+        const scopes = [
+          ...new Set([
+            ...scopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+            ...supplementalScopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+          ]),
+        ];
+        return {
+          ...app,
+          scopeMaps,
+          supplementalScopeMaps,
+          claimMaps: input.claimMaps,
+          allowedGroups: [...new Set(scopeMaps.map((scopeMap) => scopeMap.groupId))],
+          scopes: scopes.length ? scopes : ["openid", "profile"],
+          status: scopeMaps.length ? "ready" : "attention",
         };
       }),
     };

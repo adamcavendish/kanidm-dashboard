@@ -12,6 +12,7 @@ import type {
   AccessPath,
   Application,
   ApplicationPatch,
+  ApplicationPolicyInput,
   BrandingSettings,
   ConsoleState,
   CreatedApplication,
@@ -236,6 +237,8 @@ interface ConsoleContextValue {
   ) => Promise<UnixAccountSettings>;
   addApplication: (input: NewApplicationInput) => Promise<CreatedApplication>;
   updateApplication: (appId: string, patch: ApplicationPatch) => Promise<void>;
+  updateApplicationPolicy: (appId: string, input: ApplicationPolicyInput) => Promise<void>;
+  getApplicationClientSecret: (appId: string) => Promise<string | null>;
   deleteApplication: (appId: string) => Promise<void>;
   toggleGroupMember: (groupId: string, personId: string) => Promise<void>;
   uploadDomainImage: (file: File) => Promise<void>;
@@ -2343,6 +2346,84 @@ export function ConsoleProvider(props: ParentProps) {
     }));
   };
 
+  const updateApplicationPolicy = async (appId: string, input: ApplicationPolicyInput) => {
+    const current = state();
+    const app = current.apps.find((candidate) => candidate.id === appId);
+    if (!app) throw new Error("Application not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      const groupNames = new Map(current.groups.map((group) => [group.id, group.name]));
+      const kanidmInput: ApplicationPolicyInput = {
+        scopeMaps: input.scopeMaps.map((scopeMap) => ({
+          ...scopeMap,
+          groupId: groupNames.get(scopeMap.groupId) ?? scopeMap.groupId,
+        })),
+        supplementalScopeMaps: input.supplementalScopeMaps.map((scopeMap) => ({
+          ...scopeMap,
+          groupId: groupNames.get(scopeMap.groupId) ?? scopeMap.groupId,
+        })),
+        claimMaps: input.claimMaps.map((claimMap) => ({
+          ...claimMap,
+          rules: claimMap.rules.map((rule) => ({
+            ...rule,
+            groupId: groupNames.get(rule.groupId) ?? rule.groupId,
+          })),
+        })),
+      };
+      await mutateKanidm("Updating Kanidm OAuth2 policy.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateOAuth2ApplicationPolicy(app.name, kanidmInput),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      apps: previous.apps.map((candidate) => {
+        if (candidate.id !== appId) return candidate;
+        const scopeMaps = normalizedPolicyScopeMaps(input.scopeMaps);
+        const supplementalScopeMaps = normalizedPolicyScopeMaps(input.supplementalScopeMaps);
+        const scopes = [
+          ...new Set([
+            ...scopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+            ...supplementalScopeMaps.flatMap((scopeMap) => scopeMap.scopes),
+          ]),
+        ];
+        return {
+          ...candidate,
+          allowedGroups: [...new Set(scopeMaps.map((scopeMap) => scopeMap.groupId))],
+          scopes: scopes.length ? scopes : ["openid", "profile"],
+          scopeMaps,
+          supplementalScopeMaps,
+          claimMaps: input.claimMaps,
+          status: scopeMaps.length ? "ready" : "attention",
+        };
+      }),
+    }));
+  };
+
+  const getApplicationClientSecret = async (appId: string) => {
+    const app = state().apps.find((candidate) => candidate.id === appId);
+    if (!app) throw new Error("Application not found.");
+    if (app.clientType !== "confidential") return null;
+
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm OAuth2 client secret.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).getOAuth2ApplicationClientSecret(app.name),
+        { reportError: false },
+      );
+    }
+
+    return `mock-secret-${app.name}`;
+  };
+
   const deleteApplication = async (appId: string) => {
     const app = state().apps.find((candidate) => candidate.id === appId);
     if (!app) throw new Error("Application not found.");
@@ -2681,6 +2762,8 @@ export function ConsoleProvider(props: ParentProps) {
     extendServiceAccountUnixAccount,
     addApplication,
     updateApplication,
+    updateApplicationPolicy,
+    getApplicationClientSecret,
     deleteApplication,
     toggleGroupMember,
     uploadDomainImage,
@@ -3342,6 +3425,15 @@ function normalizedApplicationScopeMaps(input: NewApplicationInput) {
       scopes: uniqueLabels((explicit?.scopes.length ? explicit.scopes : input.scopes).map(String)),
     };
   });
+}
+
+function normalizedPolicyScopeMaps(scopeMaps: ApplicationPolicyInput["scopeMaps"]) {
+  return scopeMaps
+    .map((scopeMap) => ({
+      groupId: scopeMap.groupId,
+      scopes: uniqueLabels(scopeMap.scopes.map(String)),
+    }))
+    .filter((scopeMap) => scopeMap.groupId && scopeMap.scopes.length);
 }
 
 function personIdsToUsernames(personIds: string[], people: Person[]) {
