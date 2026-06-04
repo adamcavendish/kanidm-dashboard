@@ -495,6 +495,185 @@ describe("KanidmDataSource", () => {
     }
   });
 
+  it("uses Kanidm admin maintenance endpoints", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      const method = init?.method ?? "GET";
+      calls.push({
+        url: requestUrl,
+        method,
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+
+      if (requestUrl.endsWith("/v1/group/idm_unix_admins/_unix/_token")) {
+        return new Response(
+          JSON.stringify({
+            gidnumber: 2400,
+            name: "idm_unix_admins",
+            spn: "idm_unix_admins@localhost",
+            uuid: "group-unix",
+          }),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/group/idm_unix_admins/_unix")) {
+        return new Response(null, { status: 200 });
+      }
+      if (requestUrl.endsWith("/v1/group/idm_unix_admins/_attr/authsession_expiry")) {
+        return new Response(JSON.stringify(["3600"]), { status: 200 });
+      }
+      if (requestUrl.includes("/v1/group/idm_unix_admins/_attr/")) {
+        return method === "GET"
+          ? new Response(JSON.stringify({ error: "emptyrequest" }), { status: 400 })
+          : new Response(null, { status: 200 });
+      }
+      if (requestUrl.endsWith("/v1/schema/attributetype")) {
+        return new Response(
+          JSON.stringify([
+            {
+              attrs: {
+                uuid: ["schema-name"],
+                name: ["name"],
+                description: ["Unique identity name."],
+              },
+            },
+            null,
+          ]),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/schema/classtype")) {
+        return new Response(
+          JSON.stringify([
+            {
+              attrs: {
+                uuid: ["schema-group"],
+                classname: ["group"],
+                description: ["Group class."],
+              },
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/recycle_bin") && method === "GET") {
+        return new Response(
+          JSON.stringify([
+            {
+              attrs: {
+                uuid: ["recycled-uuid"],
+                name: ["deleted_user"],
+                displayname: ["Deleted User"],
+                class: ["object", "recycled"],
+              },
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/recycle_bin/recycled-uuid")) {
+        return new Response(
+          JSON.stringify({
+            attrs: {
+              uuid: ["recycled-uuid"],
+              name: ["deleted_user"],
+              class: ["object", "recycled"],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.endsWith("/v1/recycle_bin/recycled-uuid/_revive")) {
+        return new Response(null, { status: 200 });
+      }
+      if (requestUrl.endsWith("/v1/system")) {
+        return new Response(
+          JSON.stringify([
+            {
+              attrs: {
+                uuid: ["system-uuid"],
+                displayname: ["System config"],
+                description: ["System configuration."],
+                badlist_password: ["password", "qwerty"],
+              },
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (requestUrl.includes("/v1/system/_attr/")) {
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+
+      await expect(ds.groupUnixSettings("idm_unix_admins")).resolves.toMatchObject({
+        gidNumber: 2400,
+        name: "idm_unix_admins",
+      });
+      await ds.extendGroupUnix("idm_unix_admins", 2401);
+      const policy = await ds.groupPolicy("idm_unix_admins");
+      expect(policy.find((item) => item.attr === "authsession_expiry")?.values).toEqual(["3600"]);
+      expect(policy.find((item) => item.attr === "privilege_expiry")?.values).toEqual([]);
+      await ds.updateGroupPolicyAttribute("idm_unix_admins", "authsession_expiry", ["7200"]);
+      await ds.updateGroupPolicyAttribute("idm_unix_admins", "authsession_expiry", []);
+
+      const schema = await ds.schemaCatalog();
+      expect(schema.attributes[0]?.name).toBe("name");
+      expect(schema.attributes).toHaveLength(1);
+      expect(schema.classes[0]?.name).toBe("group");
+
+      const recycledEntries = await ds.recycleBinEntries();
+      expect(recycledEntries[0]?.name).toBe("deleted_user");
+      await expect(ds.recycleBinEntry("recycled-uuid")).resolves.toMatchObject({
+        id: "recycled-uuid",
+      });
+      await ds.reviveRecycleBinEntry("recycled-uuid");
+
+      const system = await ds.systemConfig();
+      expect(system[0]?.displayName).toBe("System config");
+      await ds.updateSystemAttribute("description", ["Updated"]);
+      await ds.updateSystemAttribute("description", []);
+      await expect(ds.updateSystemAttribute("badlist_password", ["password"])).rejects.toThrow(
+        /read-only/,
+      );
+
+      const findCall = (method: string, path: string) =>
+        calls.find((call) => call.method === method && call.url.endsWith(path));
+
+      expect(findCall("POST", "/v1/group/idm_unix_admins/_unix")?.body).toBe(
+        JSON.stringify({ gidnumber: 2401 }),
+      );
+      expect(findCall("GET", "/v1/recycle_bin")).toBeTruthy();
+      expect(
+        calls.some((call) => call.method === "POST" && call.url.endsWith("/v1/recycle_bin")),
+      ).toBe(false);
+      expect(findCall("POST", "/v1/recycle_bin/recycled-uuid/_revive")).toBeTruthy();
+      expect(findCall("PUT", "/v1/group/idm_unix_admins/_attr/authsession_expiry")?.body).toBe(
+        JSON.stringify(["7200"]),
+      );
+      expect(findCall("DELETE", "/v1/group/idm_unix_admins/_attr/authsession_expiry")?.body).toBe(
+        "",
+      );
+      expect(findCall("PUT", "/v1/system/_attr/description")?.body).toBe(
+        JSON.stringify(["Updated"]),
+      );
+      expect(findCall("DELETE", "/v1/system/_attr/description")?.body).toBe("");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("does not fail global load when service account list is denied", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url) => {

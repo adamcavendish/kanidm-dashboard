@@ -21,6 +21,8 @@ import type {
   DashboardConfig,
   Group,
   GroupCreationResult,
+  GroupPolicyAttribute,
+  GroupUnixSettings,
   NewApplicationInput,
   NewGroupInput,
   NewPersonInput,
@@ -33,7 +35,9 @@ import type {
   PersonCreationResult,
   PersonStatusPatch,
   ProfileUpdateInput,
+  RecycleBinEntry,
   Role,
+  SchemaCatalog,
   ServiceAccount,
   ServiceAccountApiToken,
   ServiceAccountApiTokenInput,
@@ -41,6 +45,7 @@ import type {
   ServiceAccountCredentialStatus,
   ServiceAccountPatch,
   SshPublicKey,
+  SystemConfigEntry,
   ThemeMode,
   ThemeSettings,
   UnixAccountSettings,
@@ -202,6 +207,16 @@ interface ConsoleContextValue {
   ) => Promise<void>;
   addGroupMembers: (name: string, members: string[]) => Promise<void>;
   removeGroupMembers: (name: string, members: string[]) => Promise<void>;
+  groupUnixSettings: (groupId: string) => Promise<GroupUnixSettings | null>;
+  extendGroupUnix: (groupId: string, gidNumber: number) => Promise<GroupUnixSettings | null>;
+  groupPolicy: (groupId: string) => Promise<GroupPolicyAttribute[]>;
+  updateGroupPolicyAttribute: (groupId: string, attr: string, values: string[]) => Promise<void>;
+  schemaCatalog: () => Promise<SchemaCatalog>;
+  recycleBinEntries: () => Promise<RecycleBinEntry[]>;
+  recycleBinEntry: (id: string) => Promise<RecycleBinEntry | null>;
+  reviveRecycleBinEntry: (id: string) => Promise<void>;
+  systemConfig: () => Promise<SystemConfigEntry[]>;
+  updateSystemAttribute: (attr: string, values: string[]) => Promise<void>;
   addServiceAccount: (input: NewServiceAccountInput) => Promise<ServiceAccount>;
   updateServiceAccount: (serviceAccountId: string, patch: ServiceAccountPatch) => Promise<void>;
   deleteServiceAccount: (serviceAccountId: string) => Promise<void>;
@@ -1852,6 +1867,132 @@ export function ConsoleProvider(props: ParentProps) {
     });
   };
 
+  const groupNameForId = (groupId: string) => {
+    const group = state().groups.find((candidate) => candidate.id === groupId);
+    if (!group) throw new Error("Group not found.");
+    return group.name;
+  };
+
+  const groupUnixSettings = async (groupId: string) => {
+    const id = groupNameForId(groupId);
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm("Reading Kanidm group Unix settings.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).groupUnixSettings(id),
+      );
+    }
+    return ds().groupUnixSettings(groupId);
+  };
+
+  const extendGroupUnix = async (groupId: string, gidNumber: number) => {
+    const id = groupNameForId(groupId);
+    if (config().dataSource.mode === "kanidm") {
+      const { result } = await mutateKanidm("Extending Kanidm group Unix settings.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).extendGroupUnix(id, gidNumber),
+      );
+      return result;
+    }
+    return ds().extendGroupUnix(groupId, gidNumber);
+  };
+
+  const groupPolicy = async (groupId: string) => {
+    const id = groupNameForId(groupId);
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm("Reading Kanidm group account policy.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).groupPolicy(id),
+      );
+    }
+    return ds().groupPolicy(groupId);
+  };
+
+  const updateGroupPolicyAttribute = async (groupId: string, attr: string, values: string[]) => {
+    const id = groupNameForId(groupId);
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm group account policy.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateGroupPolicyAttribute(id, attr, values),
+      );
+      return;
+    }
+    await ds().updateGroupPolicyAttribute(groupId, attr, values);
+  };
+
+  const schemaCatalog = () =>
+    config().dataSource.mode === "kanidm"
+      ? readKanidm("Reading Kanidm schema.", () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).schemaCatalog(),
+        )
+      : ds().schemaCatalog();
+
+  const recycleBinEntries = () =>
+    config().dataSource.mode === "kanidm"
+      ? readKanidm("Reading Kanidm recycle bin.", () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).recycleBinEntries(),
+        )
+      : ds().recycleBinEntries();
+
+  const recycleBinEntry = (id: string) =>
+    config().dataSource.mode === "kanidm"
+      ? readKanidm("Reading Kanidm recycle bin entry.", () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).recycleBinEntry(id),
+        )
+      : ds().recycleBinEntry(id);
+
+  const reviveRecycleBinEntry = async (id: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Reviving Kanidm recycle bin entry.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).reviveRecycleBinEntry(id),
+      );
+      return;
+    }
+    await ds().reviveRecycleBinEntry(id);
+  };
+
+  const systemConfig = () =>
+    config().dataSource.mode === "kanidm"
+      ? readKanidm("Reading Kanidm system config.", () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).systemConfig(),
+        )
+      : ds().systemConfig();
+
+  const updateSystemAttribute = async (attr: string, values: string[]) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm system config.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateSystemAttribute(attr, values),
+      );
+      return;
+    }
+    await ds().updateSystemAttribute(attr, values);
+  };
+
   const addServiceAccount = async (input: NewServiceAccountInput) => {
     const serviceAccountName = input.name.trim();
     if (config().dataSource.mode === "kanidm") {
@@ -2747,6 +2888,16 @@ export function ConsoleProvider(props: ParentProps) {
     updateGroup,
     addGroupMembers,
     removeGroupMembers,
+    groupUnixSettings,
+    extendGroupUnix,
+    groupPolicy,
+    updateGroupPolicyAttribute,
+    schemaCatalog,
+    recycleBinEntries,
+    recycleBinEntry,
+    reviveRecycleBinEntry,
+    systemConfig,
+    updateSystemAttribute,
     addServiceAccount,
     updateServiceAccount,
     deleteServiceAccount,

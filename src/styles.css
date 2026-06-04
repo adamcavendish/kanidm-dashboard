@@ -2155,6 +2155,11 @@ td small {
     justify-self: start;
   }
 
+  .maintenance-console .resource-row b {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .people-inspector .resource-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2186,5 +2191,122 @@ td small {
 
   .activity-feed small {
     grid-column: 2;
+  }
+}
+
+.maintenance-console .resource-row b,
+.schema-kind {
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.compact-fields {
+  margin-top: 12px;
+}
+
+.policy-list,
+.attr-table,
+.system-attr-list {
+  display: grid;
+  gap: 10px;
+}
+
+.policy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(180px, 1fr) max-content;
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 62%, transparent);
+}
+
+.policy-row strong,
+.policy-row small,
+.policy-row p {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.policy-row small,
+.policy-row p {
+  color: var(--muted);
+}
+
+.policy-row p {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+}
+
+.attr-table {
+  margin-top: 12px;
+}
+
+.attr-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.32fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.attr-row strong,
+.attr-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attr-row span {
+  color: var(--muted);
+}
+
+.recycle-classes {
+  margin-top: 12px;
+}
+
+.system-attr-list {
+  margin-top: 14px;
+}
+
+.attr-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.attr-select.active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.attr-select strong,
+.attr-select small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attr-select small {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .policy-row,
+  .attr-row {
+    grid-template-columns: 1fr;
   }
 }

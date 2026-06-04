@@ -4,7 +4,9 @@ import {
   AppWindow,
   Brush,
   CircleUserRound,
+  Database,
   GitBranch,
+  History,
   KeyRound,
   LayoutDashboard,
   Link as LinkIcon,
@@ -44,8 +46,11 @@ import { NewGroupPage } from "./pages/admin/new-group";
 import { NewPersonPage } from "./pages/admin/new-person";
 import { NewServiceAccountPage } from "./pages/admin/new-service-account";
 import { PeoplePage } from "./pages/admin/people";
+import { RecycleBinPage } from "./pages/admin/recycle-bin";
 import { RelationshipsPage } from "./pages/admin/relationships";
+import { SchemaPage } from "./pages/admin/schema";
 import { ServiceAccountsPage } from "./pages/admin/service-accounts";
+import { SystemPage } from "./pages/admin/system";
 
 function App() {
   return (
@@ -137,6 +142,9 @@ function SwitchPrivate() {
     if (currentPath === "/admin/apps") return <ApplicationsPage />;
     if (currentPath === "/admin/apps/new") return <NewApplicationPage />;
     if (currentPath === "/admin/relationships") return <RelationshipsPage />;
+    if (currentPath === "/admin/schema") return <SchemaPage />;
+    if (currentPath === "/admin/recycle-bin") return <RecycleBinPage />;
+    if (currentPath === "/admin/system") return <SystemPage />;
     if (currentPath === "/admin/branding") return <BrandingPage />;
     return <PortalPage />;
   });
@@ -231,6 +239,15 @@ function AdminRail() {
       </NavLink>
       <NavLink href="/admin/relationships">
         <LinkIcon size={17} /> Relationships
+      </NavLink>
+      <NavLink href="/admin/schema">
+        <Database size={17} /> Schema
+      </NavLink>
+      <NavLink href="/admin/recycle-bin">
+        <History size={17} /> Recycle bin
+      </NavLink>
+      <NavLink href="/admin/system">
+        <ShieldCheck size={17} /> System
       </NavLink>
       <NavLink href="/admin/branding">
         <Brush size={17} /> Branding
