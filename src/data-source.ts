@@ -8,11 +8,17 @@ import type {
   NewApplicationInput,
   NewGroupInput,
   NewPersonInput,
+  NewServiceAccountInput,
   Person,
   PersonCertificate,
   PersonCreationResult,
   PersonStatusPatch,
   ProfileUpdateInput,
+  ServiceAccount,
+  ServiceAccountApiToken,
+  ServiceAccountApiTokenInput,
+  ServiceAccountCredentialStatus,
+  ServiceAccountPatch,
   SshPublicKey,
   UnixAccountSettings,
   UserAuthTokenStatus,
@@ -26,6 +32,7 @@ import { PersonApi } from "./generated/kanidm-sdk/apis/PersonApi";
 import { GroupApi } from "./generated/kanidm-sdk/apis/GroupApi";
 import { Oauth2Api } from "./generated/kanidm-sdk/apis/Oauth2Api";
 import { DomainApi } from "./generated/kanidm-sdk/apis/DomainApi";
+import { ServiceAccountApi } from "./generated/kanidm-sdk/apis/ServiceAccountApi";
 import { PersonRadiusApi } from "./generated/kanidm-sdk/apis/PersonRadiusApi";
 import { PersonSshPubkeysApi } from "./generated/kanidm-sdk/apis/PersonSshPubkeysApi";
 import { PersonUnixApi } from "./generated/kanidm-sdk/apis/PersonUnixApi";
@@ -40,6 +47,8 @@ import { createGroup, createOAuth2Application } from "./kanidm-composite";
 import { KanidmHttpError, kanidmHttpError } from "./kanidm-error";
 import {
   personCreateEntry,
+  serviceAccountCreateEntry,
+  serviceAccountPatchEntry,
   mapUserAuthTokenStatus,
   mapCredentialUpdateStatus,
   mapPersonCertificates,
@@ -61,6 +70,21 @@ export interface DashboardDataSource {
   ): Promise<void>;
   addGroupMembers(name: string, members: string[]): Promise<void>;
   removeGroupMembers(name: string, members: string[]): Promise<void>;
+  createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount>;
+  deleteServiceAccount(id: string): Promise<void>;
+  updateServiceAccount(id: string, patch: ServiceAccountPatch): Promise<void>;
+  serviceAccountApiTokens(id: string): Promise<ServiceAccountApiToken[]>;
+  generateServiceAccountApiToken(id: string, input: ServiceAccountApiTokenInput): Promise<string>;
+  deleteServiceAccountApiToken(id: string, tokenId: string): Promise<void>;
+  serviceAccountCredentialStatus(id: string): Promise<ServiceAccountCredentialStatus>;
+  generateServiceAccountPassword(id: string): Promise<ServiceAccountCredentialStatus>;
+  serviceAccountSshPublicKeys(id: string): Promise<SshPublicKey[]>;
+  addServiceAccountSshPublicKey(id: string, tag: string, key: string): Promise<void>;
+  deleteServiceAccountSshPublicKey(id: string, tag: string): Promise<void>;
+  extendServiceAccountUnixAccount(
+    id: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ): Promise<void>;
   createOAuth2Application(input: NewApplicationInput): Promise<{ clientSecret?: string }>;
   updateOAuth2Application(appName: string, patch: ApplicationPatch): Promise<void>;
   deleteOAuth2Application(appName: string): Promise<void>;
@@ -114,23 +138,33 @@ export class KanidmDataSource implements DashboardDataSource {
   async load(): Promise<ConsoleState> {
     const selfApi = new SelfApi(this.config);
     const personApi = new PersonApi(this.config);
+    const serviceAccountApi = new ServiceAccountApi(this.config);
     const groupApi = new GroupApi(this.config);
     const oauth2Api = new Oauth2Api(this.config);
     const domainApi = new DomainApi(this.config);
 
-    const [selfRes, people, groups, apps, appLinks, domainDisplayName, domainEntries] =
-      await Promise.all([
-        selfApi.whoami(),
-        personApi.personGet(),
-        groupApi.groupGet(),
-        oauth2Api.oauth2Get(),
-        selfApi.selfApplinksGet().catch(() => []),
-        domainApi
-          .domainAttrGet({ attr: "domain_display_name" })
-          .then((v) => (v as string[])?.[0] ?? "")
-          .catch(() => ""),
-        domainApi.domainGet().catch(() => []),
-      ]);
+    const [
+      selfRes,
+      people,
+      serviceAccounts,
+      groups,
+      apps,
+      appLinks,
+      domainDisplayName,
+      domainEntries,
+    ] = await Promise.all([
+      selfApi.whoami(),
+      personApi.personGet(),
+      serviceAccountApi.serviceAccountGet().catch((error) => serviceAccountListFallback(error)),
+      groupApi.groupGet(),
+      oauth2Api.oauth2Get(),
+      selfApi.selfApplinksGet().catch(() => []),
+      domainApi
+        .domainAttrGet({ attr: "domain_display_name" })
+        .then((v) => (v as string[])?.[0] ?? "")
+        .catch(() => ""),
+      domainApi.domainGet().catch(() => []),
+    ]);
 
     return mapKanidmState(
       selfRes.youare as never,
@@ -138,6 +172,7 @@ export class KanidmDataSource implements DashboardDataSource {
       groups as never,
       apps as never,
       {
+        serviceAccounts: serviceAccounts as never,
         appLinks: appLinks as never,
         domainDisplayName: domainDisplayName as never,
         domainHasImage: (domainEntries as Array<{ attrs?: Record<string, string[]> }>).some(
@@ -298,6 +333,159 @@ export class KanidmDataSource implements DashboardDataSource {
       id: name,
       attr: "member",
       body: members,
+    });
+  }
+
+  async createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount> {
+    const name = input.name.trim();
+    await new ServiceAccountApi(this.config).serviceAccountPost({
+      body: serviceAccountCreateEntry(input) as unknown as Entry,
+    });
+    if (input.groups.length) {
+      await Promise.all(
+        input.groups.map((groupName) =>
+          new GroupAttrApi(this.config).groupIdAttrPost({
+            id: groupName,
+            attr: "member",
+            body: [name],
+          }),
+        ),
+      );
+    }
+    const created = (await this.load()).serviceAccounts.find(
+      (serviceAccount) => serviceAccount.name === name,
+    );
+    if (!created) throw new Error(`Kanidm created ${name}, but it was not visible after reload.`);
+    return created;
+  }
+
+  async deleteServiceAccount(id: string): Promise<void> {
+    await new ServiceAccountApi(this.config).serviceAccountIdDelete({ id });
+  }
+
+  async updateServiceAccount(id: string, patch: ServiceAccountPatch): Promise<void> {
+    const api = new ServiceAccountApi(this.config);
+    const updates: Promise<unknown>[] = [];
+    const fallbackPatch = serviceAccountPatchEntry(patch);
+
+    if (patch.displayName !== undefined) {
+      updates.push(
+        api.serviceAccountIdPutAttr({
+          id,
+          attr: "displayname",
+          body: [patch.displayName.trim()],
+        }),
+      );
+    }
+    if (patch.description !== undefined) {
+      const description = patch.description.trim();
+      updates.push(
+        description
+          ? api.serviceAccountIdPutAttr({ id, attr: "description", body: [description] })
+          : deleteServiceAccountAttr(api, id, "description"),
+      );
+    }
+    if (patch.managedBy !== undefined) {
+      const managedBy = patch.managedBy.trim();
+      updates.push(
+        managedBy
+          ? api.serviceAccountIdPutAttr({ id, attr: "entry_managed_by", body: [managedBy] })
+          : deleteServiceAccountAttr(api, id, "entry_managed_by"),
+      );
+    }
+    if (!updates.length && Object.keys(fallbackPatch.attrs ?? {}).length) {
+      updates.push(api.serviceAccountIdPatch({ id, body: fallbackPatch as unknown as Entry }));
+    }
+    await Promise.all(updates);
+  }
+
+  async serviceAccountApiTokens(id: string): Promise<ServiceAccountApiToken[]> {
+    const tokens = await new ServiceAccountApi(this.config).serviceAccountApiTokenGet({ id });
+    return tokens.map((token) => ({
+      accountId: token.accountId,
+      tokenId: token.tokenId,
+      label: token.label,
+      issuedAt: token.issuedAt,
+      expiry: token.expiry,
+      purpose: token.purpose ?? "unknown",
+    }));
+  }
+
+  async generateServiceAccountApiToken(
+    id: string,
+    input: ServiceAccountApiTokenInput,
+  ): Promise<string> {
+    const expiry = input.expiry?.trim() || null;
+    return new ServiceAccountApi(this.config).serviceAccountApiTokenPost({
+      id,
+      body: {
+        label: input.label.trim(),
+        // Kanidm 1.10.3 requires a present expiry field even when it is empty.
+        expiry: expiry as string | undefined,
+        readWrite: input.readWrite,
+        compact: input.compact,
+      },
+    });
+  }
+
+  async deleteServiceAccountApiToken(id: string, tokenId: string): Promise<void> {
+    await new ServiceAccountApi(this.config).serviceAccountApiTokenDelete({ id, tokenId });
+  }
+
+  async serviceAccountCredentialStatus(id: string): Promise<ServiceAccountCredentialStatus> {
+    await new ServiceAccountApi(this.config).serviceAccountIdCredentialStatusGet({ id });
+    return { checkedAt: new Date().toISOString(), reachable: true };
+  }
+
+  async generateServiceAccountPassword(id: string): Promise<ServiceAccountCredentialStatus> {
+    await new ServiceAccountApi(this.config).serviceAccountCredentialGenerate({ id });
+    const generatedAt = new Date().toISOString();
+    return { checkedAt: generatedAt, generatedAt, reachable: true };
+  }
+
+  async serviceAccountSshPublicKeys(id: string): Promise<SshPublicKey[]> {
+    const api = new ServiceAccountApi(this.config);
+    const keys = await serviceAccountSshKeysFromAttrs(api, id);
+    if (keys.length) return keys;
+
+    const values = (await api.serviceAccountIdSshPubkeysGet({ id })) as string[];
+    return Promise.all(
+      values.map(async (value, index) => {
+        if (looksLikeSshPublicKey(value)) {
+          return { tag: `key-${index + 1}`, key: value };
+        }
+        return {
+          tag: value,
+          key: (await api.serviceAccountIdSshPubkeysTagGet({
+            id,
+            tag: value,
+          })) as unknown as string,
+        };
+      }),
+    );
+  }
+
+  async addServiceAccountSshPublicKey(id: string, tag: string, key: string): Promise<void> {
+    await new ServiceAccountApi(this.config).serviceAccountIdSshPubkeysPost({
+      id,
+      body: [tag.trim(), key.trim()],
+    });
+  }
+
+  async deleteServiceAccountSshPublicKey(id: string, tag: string): Promise<void> {
+    await new ServiceAccountApi(this.config).serviceAccountIdSshPubkeysTagDelete({ id, tag });
+  }
+
+  async extendServiceAccountUnixAccount(
+    id: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ): Promise<void> {
+    await new ServiceAccountApi(this.config).serviceAccountIdUnixPost({
+      id,
+      body: {
+        gidnumber: input.gidNumber ?? undefined,
+        shell: input.shell.trim() || undefined,
+      },
     });
   }
 
@@ -564,6 +752,68 @@ export class KanidmDataSource implements DashboardDataSource {
   }
 }
 
+function updateServiceAccountTokenCount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  count: number,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            credential: { ...serviceAccount.credential, apiTokens: count },
+            status: count > 0 ? "ready" : serviceAccount.status,
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
+function updateServiceAccountSshKeyCount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  count: number,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            credential: { ...serviceAccount.credential, sshKeys: count },
+            status: count > 0 ? "ready" : serviceAccount.status,
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
+function updateServiceAccountUnixAccount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  unix: UnixAccountSettings,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            unix,
+            credential: {
+              ...serviceAccount.credential,
+              unixCredential:
+                unix.credentialSet || unix.gidNumber !== null || unix.shell.trim().length > 0,
+            },
+            status: "ready",
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
 function writeOptionalPersonAttr(
   api: PersonAttrApi,
   writes: Promise<void>[],
@@ -595,12 +845,58 @@ async function deletePersonAttr(api: PersonAttrApi, id: string, attr: string) {
   }
 }
 
+function serviceAccountListFallback(error: unknown): Entry[] {
+  const status = kanidmErrorStatus(error);
+  if (status && [400, 401, 403, 404, 405].includes(status)) return [];
+  throw error;
+}
+
+function serviceAccountSshKeysFromEntry(entry: Entry | null): SshPublicKey[] {
+  return (entry?.attrs.ssh_publickey ?? []).map((value, index) => {
+    const separator = value.indexOf(": ");
+    if (separator <= 0) {
+      return { tag: `key-${index + 1}`, key: value };
+    }
+    return {
+      tag: value.slice(0, separator),
+      key: value.slice(separator + 2),
+    };
+  });
+}
+
+async function serviceAccountSshKeysFromAttrs(
+  api: ServiceAccountApi,
+  id: string,
+): Promise<SshPublicKey[]> {
+  try {
+    return serviceAccountSshKeysFromEntry(await api.serviceAccountIdGet({ id }));
+  } catch (error) {
+    if ([400, 401, 403, 404, 405].includes(kanidmErrorStatus(error) ?? 0)) return [];
+    throw error;
+  }
+}
+
+function looksLikeSshPublicKey(value: string) {
+  return /^(?:sk-)?(?:ssh|ecdsa)-[a-z0-9@._-]+\s+/i.test(value);
+}
+
+async function deleteServiceAccountAttr(api: ServiceAccountApi, id: string, attr: string) {
+  try {
+    await api.serviceAccountIdDeleteAttr({ id, attr });
+  } catch (error) {
+    if (kanidmErrorStatus(error) === 404) return;
+    throw error;
+  }
+}
+
 import { initialState, seedPeople } from "./seed";
 
 export class MockDataSource implements DashboardDataSource {
   private state: ConsoleState;
   private radiusPasswords: Record<string, string> = {};
   private certificates: Record<string, PersonCertificate[]> = {};
+  private serviceAccountTokens: Record<string, ServiceAccountApiToken[]> = {};
+  private serviceAccountSshKeys: Record<string, SshPublicKey[]> = {};
   private storageKey: string;
 
   constructor(storageKey = "kanidm-dashboard-state-v2") {
@@ -612,6 +908,38 @@ export class MockDataSource implements DashboardDataSource {
   private persist() {
     if (typeof localStorage !== "undefined")
       localStorage.setItem(this.storageKey, JSON.stringify(this.state));
+  }
+
+  private tokensForServiceAccount(id: string): ServiceAccountApiToken[] {
+    if (this.serviceAccountTokens[id]) return this.serviceAccountTokens[id];
+    const serviceAccount = this.state.serviceAccounts.find((candidate) => candidate.id === id);
+    const tokens = Array.from(
+      { length: serviceAccount?.credential.apiTokens ?? 0 },
+      (_, index) => ({
+        accountId: id,
+        tokenId: `00000000-0000-4000-a100-${String(index + 1).padStart(12, "0")}`,
+        label: index === 0 ? "deployment token" : `automation token ${index + 1}`,
+        issuedAt: new Date(Date.now() - (index + 1) * 86_400_000).toISOString(),
+        expiry: index === 0 ? undefined : new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        purpose: index === 0 ? ("readwrite" as const) : ("readonly" as const),
+      }),
+    );
+    this.serviceAccountTokens[id] = tokens;
+    return tokens;
+  }
+
+  private sshKeysForServiceAccount(id: string): SshPublicKey[] {
+    if (this.serviceAccountSshKeys[id]) return this.serviceAccountSshKeys[id];
+    const serviceAccount = this.state.serviceAccounts.find((candidate) => candidate.id === id);
+    const keys = Array.from({ length: serviceAccount?.credential.sshKeys ?? 0 }, (_, index) => {
+      const tag = index === 0 ? "deploy-host" : `service-key-${index + 1}`;
+      return {
+        tag,
+        key: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${serviceAccount?.name ?? "svc"}${index}DemoPublicKey ${tag}`,
+      };
+    });
+    this.serviceAccountSshKeys[id] = keys;
+    return keys;
   }
 
   async load(): Promise<ConsoleState> {
@@ -810,6 +1138,163 @@ export class MockDataSource implements DashboardDataSource {
         members.includes(p.id) ? { ...p, groups: p.groups.filter((gid) => gid !== group.id) } : p,
       ),
     };
+    this.persist();
+  }
+  async createServiceAccount(input: NewServiceAccountInput): Promise<ServiceAccount> {
+    const serviceAccount: ServiceAccount = {
+      id: `mock-${input.name.trim()}`,
+      name: input.name.trim(),
+      displayName: input.displayName.trim(),
+      description: input.description.trim(),
+      managedBy: input.managedBy,
+      groups: input.groups,
+      credential: {
+        password: "unknown",
+        apiTokens: 0,
+        sshKeys: 0,
+        unixCredential: false,
+      },
+      unix: { gidNumber: null, shell: "", credentialSet: false },
+      status: input.groups.length ? "ready" : "attention",
+    };
+    this.state = {
+      ...this.state,
+      serviceAccounts: [...this.state.serviceAccounts, serviceAccount],
+      groups: this.state.groups.map((g) =>
+        input.groups.includes(g.id)
+          ? { ...g, members: [...new Set([...g.members, serviceAccount.id])] }
+          : g,
+      ),
+    };
+    this.persist();
+    return serviceAccount;
+  }
+  async deleteServiceAccount(id: string): Promise<void> {
+    this.state = {
+      ...this.state,
+      serviceAccounts: this.state.serviceAccounts.filter(
+        (serviceAccount) => serviceAccount.id !== id,
+      ),
+      groups: this.state.groups.map((group) => ({
+        ...group,
+        members: group.members.filter((memberId) => memberId !== id),
+      })),
+    };
+    delete this.serviceAccountTokens[id];
+    delete this.serviceAccountSshKeys[id];
+    this.persist();
+  }
+  async updateServiceAccount(id: string, patch: ServiceAccountPatch): Promise<void> {
+    this.state = {
+      ...this.state,
+      serviceAccounts: this.state.serviceAccounts.map((serviceAccount) =>
+        serviceAccount.id === id
+          ? {
+              ...serviceAccount,
+              ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() } : {}),
+              ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+              ...(patch.managedBy !== undefined ? { managedBy: patch.managedBy } : {}),
+            }
+          : serviceAccount,
+      ),
+    };
+    this.persist();
+  }
+  async serviceAccountApiTokens(id: string): Promise<ServiceAccountApiToken[]> {
+    return this.tokensForServiceAccount(id);
+  }
+  async generateServiceAccountApiToken(
+    id: string,
+    input: ServiceAccountApiTokenInput,
+  ): Promise<string> {
+    const token: ServiceAccountApiToken = {
+      accountId: id,
+      tokenId: `00000000-0000-4000-a000-${Math.random().toString().slice(2, 14).padEnd(12, "0")}`,
+      label: input.label.trim(),
+      issuedAt: new Date().toISOString(),
+      expiry: input.expiry?.trim() || undefined,
+      purpose: input.readWrite ? "readwrite" : "readonly",
+    };
+    this.serviceAccountTokens[id] = [...this.tokensForServiceAccount(id), token];
+    this.state = updateServiceAccountTokenCount(
+      this.state,
+      id,
+      this.serviceAccountTokens[id].length,
+    );
+    this.persist();
+    return `svctok_${Math.random().toString(36).slice(2, 20)}`;
+  }
+  async deleteServiceAccountApiToken(id: string, tokenId: string): Promise<void> {
+    this.serviceAccountTokens[id] = this.tokensForServiceAccount(id).filter(
+      (token) => token.tokenId !== tokenId,
+    );
+    this.state = updateServiceAccountTokenCount(
+      this.state,
+      id,
+      this.serviceAccountTokens[id].length,
+    );
+    this.persist();
+  }
+  async serviceAccountCredentialStatus(id: string): Promise<ServiceAccountCredentialStatus> {
+    return {
+      checkedAt: new Date().toISOString(),
+      reachable: this.state.serviceAccounts.some((serviceAccount) => serviceAccount.id === id),
+    };
+  }
+  async generateServiceAccountPassword(id: string): Promise<ServiceAccountCredentialStatus> {
+    const generatedAt = new Date().toISOString();
+    this.state = {
+      ...this.state,
+      serviceAccounts: this.state.serviceAccounts.map((serviceAccount) =>
+        serviceAccount.id === id
+          ? {
+              ...serviceAccount,
+              credential: { ...serviceAccount.credential, password: "present" },
+              status: "ready",
+            }
+          : serviceAccount,
+      ),
+    };
+    this.persist();
+    return { checkedAt: generatedAt, generatedAt, reachable: true };
+  }
+  async serviceAccountSshPublicKeys(id: string): Promise<SshPublicKey[]> {
+    return this.sshKeysForServiceAccount(id);
+  }
+  async addServiceAccountSshPublicKey(id: string, tag: string, key: string): Promise<void> {
+    const nextKey = { tag: tag.trim(), key: key.trim() };
+    this.serviceAccountSshKeys[id] = [
+      ...this.sshKeysForServiceAccount(id).filter((item) => item.tag !== nextKey.tag),
+      nextKey,
+    ];
+    this.state = updateServiceAccountSshKeyCount(
+      this.state,
+      id,
+      this.serviceAccountSshKeys[id].length,
+    );
+    this.persist();
+  }
+  async deleteServiceAccountSshPublicKey(id: string, tag: string): Promise<void> {
+    this.serviceAccountSshKeys[id] = this.sshKeysForServiceAccount(id).filter(
+      (item) => item.tag !== tag,
+    );
+    this.state = updateServiceAccountSshKeyCount(
+      this.state,
+      id,
+      this.serviceAccountSshKeys[id].length,
+    );
+    this.persist();
+  }
+  async extendServiceAccountUnixAccount(
+    id: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ): Promise<void> {
+    const unix: UnixAccountSettings = {
+      gidNumber: input.gidNumber,
+      shell: input.shell.trim(),
+      credentialSet: Boolean(input.gidNumber !== null || input.shell.trim()),
+    };
+    this.state = updateServiceAccountUnixAccount(this.state, id, unix);
     this.persist();
   }
   async createOAuth2Application(input: NewApplicationInput): Promise<{ clientSecret?: string }> {

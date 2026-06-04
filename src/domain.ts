@@ -51,6 +51,53 @@ export interface UnixAccountSettings {
   credentialSet: boolean;
 }
 
+export type ServiceAccountStatus = "ready" | "attention";
+
+export type ServiceAccountCredentialState = "unknown" | "present" | "missing";
+
+export interface ServiceAccountCredentialSummary {
+  password: ServiceAccountCredentialState;
+  apiTokens: number;
+  sshKeys: number;
+  unixCredential: boolean;
+}
+
+export interface ServiceAccount {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  managedBy: string;
+  groups: string[];
+  credential: ServiceAccountCredentialSummary;
+  unix: UnixAccountSettings;
+  status: ServiceAccountStatus;
+}
+
+export type ServiceAccountApiTokenPurpose = "readonly" | "readwrite" | "synchronise" | "unknown";
+
+export interface ServiceAccountApiToken {
+  accountId: string;
+  tokenId: string;
+  label: string;
+  issuedAt: string;
+  expiry?: string;
+  purpose: ServiceAccountApiTokenPurpose;
+}
+
+export interface ServiceAccountApiTokenInput {
+  label: string;
+  expiry?: string;
+  readWrite: boolean;
+  compact: boolean;
+}
+
+export interface ServiceAccountCredentialStatus {
+  checkedAt: string;
+  reachable: boolean;
+  generatedAt?: string;
+}
+
 export interface Person {
   id: string;
   username: string;
@@ -206,6 +253,7 @@ export interface ConsoleState {
   currentUserId: string;
   branding: BrandingSettings;
   people: Person[];
+  serviceAccounts: ServiceAccount[];
   groups: Group[];
   apps: Application[];
 }
@@ -244,6 +292,14 @@ export interface NewGroupInput {
   managedBy: string;
 }
 
+export interface NewServiceAccountInput {
+  name: string;
+  displayName: string;
+  description: string;
+  managedBy: string;
+  groups: string[];
+}
+
 export interface NewApplicationInput {
   name: string;
   displayName: string;
@@ -260,6 +316,12 @@ export interface ApplicationPatch {
   displayName?: string;
   landingUrl?: string;
   redirectUris?: string[];
+}
+
+export interface ServiceAccountPatch {
+  displayName?: string;
+  description?: string;
+  managedBy?: string;
 }
 
 export interface ProfileUpdateInput {
@@ -306,6 +368,7 @@ export const defaultDashboardConfig: DashboardConfig = {
 export const supportedAdminSurfaces = [
   "Persons and self-service profile attributes",
   "Person lifecycle, groups, certificates, and admin credential operations",
+  "Service accounts, API tokens, SSH keys, generated credentials, and Unix settings",
   "Groups and membership",
   "OAuth2/OIDC application display names and images",
   "Domain display name and domain image",

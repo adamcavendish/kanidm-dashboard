@@ -131,6 +131,80 @@ describe("relationship helpers", () => {
     );
     expect(state.apps[0]?.allowedGroups).toEqual(["group-parent"]);
   });
+
+  it("maps direct memberships without treating every available group as selected", () => {
+    const state = mapKanidmState(
+      {
+        attrs: {
+          displayname: ["UI User"],
+          directmemberof: ["registry_child@localhost"],
+          memberof: ["registry_child@localhost", "registry_parent@localhost"],
+          name: ["uiuser"],
+          spn: ["uiuser@localhost"],
+        },
+      },
+      [],
+      [
+        {
+          attrs: {
+            name: ["registry_parent"],
+            spn: ["registry_parent@localhost"],
+            uuid: ["group-parent"],
+          },
+        },
+        {
+          attrs: {
+            member: ["ci_runner@localhost"],
+            memberof: ["registry_parent@localhost"],
+            name: ["registry_child"],
+            spn: ["registry_child@localhost"],
+            uuid: ["group-child"],
+          },
+        },
+      ],
+      [],
+      {
+        serviceAccounts: [
+          {
+            attrs: {
+              name: ["ci_runner"],
+              spn: ["ci_runner@localhost"],
+            },
+          },
+        ],
+      },
+    );
+
+    expect(state.groups.map((group) => group.id)).toEqual(["group-parent", "group-child"]);
+    expect(state.people[0]?.groups).toEqual(["group-child"]);
+    expect(resolveGroupClosure(state.people[0]?.groups ?? [], state.groups)).toContain(
+      "group-parent",
+    );
+    expect(state.serviceAccounts[0]?.groups).toEqual(["group-child"]);
+  });
+
+  it("maps live service account SSH key attrs into summary state", () => {
+    const state = mapKanidmState(
+      { attrs: { name: ["admin"], spn: ["admin@localhost"] } },
+      [],
+      [],
+      [],
+      {
+        serviceAccounts: [
+          {
+            attrs: {
+              name: ["mail_sender"],
+              spn: ["mail_sender@localhost"],
+              ssh_publickey: ["deploy-host: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest deploy"],
+            },
+          },
+        ],
+      },
+    );
+
+    expect(state.serviceAccounts[0]?.credential.sshKeys).toBe(1);
+    expect(state.serviceAccounts[0]?.status).toBe("ready");
+  });
 });
 
 describe("startup state", () => {
@@ -150,6 +224,7 @@ describe("startup state", () => {
     expect(state.people).toHaveLength(1);
     expect(state.people[0]?.displayName).toBe("Not signed in");
     expect(state.people.some((person) => person.displayName === "Ava Chen")).toBe(false);
+    expect(state.serviceAccounts).toHaveLength(0);
     expect(state.groups).toHaveLength(0);
     expect(state.apps).toHaveLength(0);
   });

@@ -728,6 +728,14 @@ td small,
   gap: 8px;
 }
 
+.membership-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 14px;
+}
+
+.membership-summary h4,
 .access-preview h4 {
   margin: 0;
   font-size: 0.9rem;
@@ -1828,6 +1836,88 @@ td small {
   color: var(--muted);
 }
 
+.service-posture-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.service-posture-grid > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 54%, transparent);
+}
+
+.service-posture-grid strong {
+  font-size: 1.28rem;
+}
+
+.service-posture-grid small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(76px, max-content) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.token-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.token-row small,
+.token-row code {
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.inline-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.inline-confirm .secondary-action,
+.inline-confirm .danger-action {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.toggle-row label {
+  display: flex;
+  width: auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+}
+
 .qr-preview {
   display: grid;
   place-items: center;
@@ -2014,6 +2104,11 @@ td small {
 
   .key-value,
   .custom-scope-row {
+    grid-template-columns: 1fr;
+  }
+
+  .service-posture-grid,
+  .token-row {
     grid-template-columns: 1fr;
   }
 

@@ -1,4 +1,11 @@
-import type { Application, BrandingSettings, ConsoleState, Group, Person } from "./domain";
+import type {
+  Application,
+  BrandingSettings,
+  ConsoleState,
+  Group,
+  Person,
+  ServiceAccount,
+} from "./domain";
 import { defaultDashboardConfig } from "./domain";
 
 export const defaultBranding: BrandingSettings = {
@@ -177,6 +184,49 @@ export const seedGroups: Group[] = [
   },
 ];
 
+export const seedServiceAccounts: ServiceAccount[] = [
+  {
+    id: "svc-mail-sender",
+    name: "mail_sender",
+    displayName: "Mail Sender",
+    description: "Sends account recovery and credential update mail through Kanidm.",
+    managedBy: "g-admins",
+    groups: ["g-admins"],
+    credential: {
+      password: "present",
+      apiTokens: 2,
+      sshKeys: 1,
+      unixCredential: false,
+    },
+    unix: {
+      gidNumber: null,
+      shell: "",
+      credentialSet: false,
+    },
+    status: "ready",
+  },
+  {
+    id: "svc-sync-agent",
+    name: "sync_agent",
+    displayName: "Sync Agent",
+    description: "Automation identity for directory synchronization jobs.",
+    managedBy: "g-admins",
+    groups: ["g-engineering"],
+    credential: {
+      password: "unknown",
+      apiTokens: 1,
+      sshKeys: 0,
+      unixCredential: true,
+    },
+    unix: {
+      gidNumber: 21010,
+      shell: "/usr/sbin/nologin",
+      credentialSet: true,
+    },
+    status: "attention",
+  },
+];
+
 export const seedApps: Application[] = [
   {
     id: "app-grafana",
@@ -233,6 +283,7 @@ export const initialState: ConsoleState = {
   currentUserId: "u-ava",
   branding: defaultBranding,
   people: seedPeople,
+  serviceAccounts: seedServiceAccounts,
   groups: seedGroups,
   apps: seedApps,
 };
