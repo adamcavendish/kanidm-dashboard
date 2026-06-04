@@ -7,10 +7,13 @@ import type {
   NewApplicationInput,
   NewGroupInput,
   NewPersonInput,
+  NewServiceAccountInput,
   PasskeyCredential,
   PasskeyRegistration,
   Person,
   PersonCertificate,
+  ServiceAccount,
+  ServiceAccountPatch,
   TotpRegistration,
   UserAuthTokenStatus,
 } from "./domain";
@@ -115,6 +118,17 @@ export function groupCreateEntry(input: NewGroupInput): KanidmEntry {
   };
 }
 
+export function serviceAccountCreateEntry(input: NewServiceAccountInput): KanidmEntry {
+  return {
+    attrs: compactAttrs({
+      name: [input.name.trim()],
+      displayname: [input.displayName.trim()],
+      description: [input.description.trim()],
+      entry_managed_by: [input.managedBy.trim()],
+    }),
+  };
+}
+
 export function oauth2CreateEntry(input: NewApplicationInput): KanidmEntry {
   return {
     attrs: compactAttrs({
@@ -122,6 +136,16 @@ export function oauth2CreateEntry(input: NewApplicationInput): KanidmEntry {
       displayname: [input.displayName.trim()],
       oauth2_rs_origin: input.redirectUris.map((value) => value.trim()),
       oauth2_rs_origin_landing: [input.landingUrl.trim()],
+    }),
+  };
+}
+
+export function serviceAccountPatchEntry(patch: ServiceAccountPatch): KanidmEntry {
+  return {
+    attrs: compactAttrs({
+      displayname: patch.displayName !== undefined ? [patch.displayName.trim()] : undefined,
+      description: patch.description !== undefined ? [patch.description.trim()] : undefined,
+      entry_managed_by: patch.managedBy !== undefined ? [patch.managedBy.trim()] : undefined,
     }),
   };
 }
@@ -216,13 +240,15 @@ export function mapKanidmState(
   groups: KanidmEntry[],
   apps: KanidmEntry[],
   options: {
+    serviceAccounts?: KanidmEntry[];
     appLinks?: KanidmAppLink[];
     domainDisplayName?: string;
     domainHasImage?: boolean;
     canManageNativeDomainBranding?: boolean;
   } = {},
 ): ConsoleState {
-  const mappedGroups = mapGroups(groups, [self, ...people], apps);
+  const serviceAccountEntries = options.serviceAccounts ?? [];
+  const mappedGroups = mapGroups(groups, [self, ...people, ...serviceAccountEntries], apps);
   const mappedPeople = people.map((entry) => mapPerson(entry, mappedGroups, groups));
   const selfPerson = mapPerson(self, mappedGroups, groups);
   const selfPersonIndex = mappedPeople.findIndex((person) => samePerson(person, selfPerson));
@@ -237,11 +263,13 @@ export function mapKanidmState(
     (person) => person.username === currentUserName || person.email === currentUserName,
   );
   const adminGroup = mappedGroups.find((group) => group.name === "idm_admins");
-  const role =
-    currentUser &&
-    (currentUser.username === "admin" || (adminGroup && currentUser.groups.includes(adminGroup.id)))
-      ? "admin"
-      : "user";
+  const currentUserGroupIds = currentUser
+    ? resolveMappedGroupClosure(currentUser.groups, mappedGroups)
+    : [];
+  const isCurrentUserAdmin =
+    currentUser?.username === "admin" ||
+    Boolean(adminGroup && currentUserGroupIds.includes(adminGroup.id));
+  const role = currentUser && isCurrentUserAdmin ? "admin" : "user";
   const mappedApps = mergeAppLinks(
     apps.map((entry) => mapApplication(entry, mappedGroups)),
     options.appLinks ?? [],
@@ -259,6 +287,9 @@ export function mapKanidmState(
     role,
     currentUserId: currentUser?.id ?? allPeople[0]?.id ?? initialState.currentUserId,
     people: allPeople.length ? allPeople : initialState.people,
+    serviceAccounts: serviceAccountEntries.map((entry) =>
+      mapServiceAccount(entry, mappedGroups, groups),
+    ),
     groups: mappedGroups.length ? mappedGroups : initialState.groups,
     apps: mappedApps,
   };
@@ -266,14 +297,13 @@ export function mapKanidmState(
 
 function mapPerson(entry: KanidmEntry, groups: Group[], groupEntries: KanidmEntry[]): Person {
   const username = attr(entry, "name") || attr(entry, "spn") || stableId("person", entry);
-  const memberOf = [...values(entry, "memberof"), ...values(entry, "directmemberof")];
+  const memberOf = membershipRefs(entry);
+  const personRefs = entryRefs(entry, username);
   const gidNumber = parseOptionalNumber(attr(entry, "gidnumber"));
   const shell = attr(entry, "loginshell") || attr(entry, "shell");
   const unixCredentialSet = gidNumber !== null || shell.length > 0;
   const groupIds = groups
-    .filter((group, index) =>
-      refsIntersect(memberOf, entryRefs(groupEntries[index], group.name, group.id)),
-    )
+    .filter((group, index) => isMemberOfGroup(memberOf, personRefs, groupEntries[index], group))
     .map((group) => group.id);
 
   return {
@@ -302,6 +332,56 @@ function mapPerson(entry: KanidmEntry, groups: Group[], groupEntries: KanidmEntr
       credentialSet: unixCredentialSet,
     },
     lastAuth: attr(entry, "last_auth") || "Unknown",
+  };
+}
+
+function mapServiceAccount(
+  entry: KanidmEntry,
+  groups: Group[],
+  groupEntries: KanidmEntry[],
+): ServiceAccount {
+  const name = attr(entry, "name") || attr(entry, "spn") || stableId("svc", entry);
+  const memberOf = membershipRefs(entry);
+  const serviceAccountRefs = entryRefs(entry, name);
+  const gidNumber = parseOptionalNumber(attr(entry, "gidnumber"));
+  const shell = attr(entry, "loginshell") || attr(entry, "shell");
+  const unixCredentialSet = gidNumber !== null || shell.length > 0;
+  const groupIds = groups
+    .filter((group, index) =>
+      isMemberOfGroup(memberOf, serviceAccountRefs, groupEntries[index], group),
+    )
+    .map((group) => group.id);
+  const sshKeyCount =
+    values(entry, "ssh_publickey").length +
+    values(entry, "sshpublickey").length +
+    values(entry, "ldapsshpublickey").length;
+  const hasPassword =
+    values(entry, "primarycredential").length > 0 ||
+    values(entry, "credential").length > 0 ||
+    values(entry, "userpassword").length > 0;
+  const managedByRef = attr(entry, "entry_managed_by");
+  const managedBy =
+    groups.find((group) => groupMatchesRef(group, managedByRef))?.id ?? managedByRef;
+
+  return {
+    id: attr(entry, "uuid") || `svc-${name}`,
+    name,
+    displayName: attr(entry, "displayname") || name,
+    description: attr(entry, "description") || "Kanidm service account",
+    managedBy,
+    groups: groupIds,
+    credential: {
+      password: hasPassword ? "present" : "unknown",
+      apiTokens: values(entry, "api_token_session").length,
+      sshKeys: sshKeyCount,
+      unixCredential: unixCredentialSet,
+    },
+    unix: {
+      gidNumber,
+      shell,
+      credentialSet: unixCredentialSet,
+    },
+    status: groupIds.length || sshKeyCount > 0 || unixCredentialSet ? "ready" : "attention",
   };
 }
 
@@ -580,11 +660,7 @@ function syntheticGroup(name: string, personEntries: KanidmEntry[]): Group {
     displayName: name,
     description: "Kanidm group",
     members: personEntries
-      .filter((entry) =>
-        [...values(entry, "memberof"), ...values(entry, "directmemberof")].some(
-          (ref) => normalizeRef(ref) === name,
-        ),
-      )
+      .filter((entry) => membershipRefs(entry).some((ref) => normalizeRef(ref) === name))
       .map((entry) => attr(entry, "spn") || attr(entry, "name"))
       .filter((value) => value.length > 0),
     parentGroups: [],
@@ -703,6 +779,34 @@ function values(entry: KanidmEntry, key: string) {
   const attrs = entry.attrs ?? entry;
   const value = (attrs as Record<string, unknown>)[key];
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function membershipRefs(entry: KanidmEntry) {
+  const direct = values(entry, "directmemberof");
+  return direct.length ? direct : values(entry, "memberof");
+}
+
+function resolveMappedGroupClosure(groupIds: string[], groups: Group[]) {
+  const seen = new Set<string>();
+  const visit = (groupId: string) => {
+    if (seen.has(groupId)) return;
+    seen.add(groupId);
+    groups.find((group) => group.id === groupId)?.parentGroups.forEach(visit);
+  };
+  groupIds.forEach(visit);
+  return [...seen];
+}
+
+function isMemberOfGroup(
+  memberOfRefs: string[],
+  accountRefs: Set<string>,
+  groupEntry: KanidmEntry | undefined,
+  group: Group,
+) {
+  return (
+    refsIntersect(memberOfRefs, entryRefs(groupEntry, group.name, group.id)) ||
+    refsIntersect(values(groupEntry ?? {}, "member"), accountRefs)
+  );
 }
 
 function refsIntersect(left: string[], right: Set<string>) {

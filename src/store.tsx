@@ -23,6 +23,7 @@ import type {
   NewApplicationInput,
   NewGroupInput,
   NewPersonInput,
+  NewServiceAccountInput,
   PasskeyCredential,
   PasskeyLoginChallenge,
   PasskeyRegistration,
@@ -32,6 +33,12 @@ import type {
   PersonStatusPatch,
   ProfileUpdateInput,
   Role,
+  ServiceAccount,
+  ServiceAccountApiToken,
+  ServiceAccountApiTokenInput,
+  ServiceAccountCredentialState,
+  ServiceAccountCredentialStatus,
+  ServiceAccountPatch,
   SshPublicKey,
   ThemeMode,
   ThemeSettings,
@@ -194,6 +201,39 @@ interface ConsoleContextValue {
   ) => Promise<void>;
   addGroupMembers: (name: string, members: string[]) => Promise<void>;
   removeGroupMembers: (name: string, members: string[]) => Promise<void>;
+  addServiceAccount: (input: NewServiceAccountInput) => Promise<ServiceAccount>;
+  updateServiceAccount: (serviceAccountId: string, patch: ServiceAccountPatch) => Promise<void>;
+  deleteServiceAccount: (serviceAccountId: string) => Promise<void>;
+  toggleServiceAccountGroup: (serviceAccountId: string, groupId: string) => Promise<void>;
+  getServiceAccountApiTokens: (serviceAccountId: string) => Promise<ServiceAccountApiToken[]>;
+  generateServiceAccountApiToken: (
+    serviceAccountId: string,
+    input: ServiceAccountApiTokenInput,
+  ) => Promise<{ token: string; tokens: ServiceAccountApiToken[] }>;
+  deleteServiceAccountApiToken: (
+    serviceAccountId: string,
+    tokenId: string,
+  ) => Promise<ServiceAccountApiToken[]>;
+  getServiceAccountCredentialStatus: (
+    serviceAccountId: string,
+  ) => Promise<ServiceAccountCredentialStatus>;
+  generateServiceAccountPassword: (
+    serviceAccountId: string,
+  ) => Promise<ServiceAccountCredentialStatus>;
+  getServiceAccountSshPublicKeys: (serviceAccountId: string) => Promise<SshPublicKey[]>;
+  addServiceAccountSshPublicKey: (
+    serviceAccountId: string,
+    tag: string,
+    key: string,
+  ) => Promise<SshPublicKey[]>;
+  deleteServiceAccountSshPublicKey: (
+    serviceAccountId: string,
+    tag: string,
+  ) => Promise<SshPublicKey[]>;
+  extendServiceAccountUnixAccount: (
+    serviceAccountId: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ) => Promise<UnixAccountSettings>;
   addApplication: (input: NewApplicationInput) => Promise<CreatedApplication>;
   updateApplication: (appId: string, patch: ApplicationPatch) => Promise<void>;
   deleteApplication: (appId: string) => Promise<void>;
@@ -218,6 +258,12 @@ export function ConsoleProvider(props: ParentProps) {
   );
   let mockRadiusPasswords = seedMockRadiusPasswords();
   const [mockSshPublicKeys, setMockSshPublicKeys] = createSignal(seedMockSshPublicKeys());
+  const [mockServiceAccountApiTokens, setMockServiceAccountApiTokens] = createSignal(
+    seedMockServiceAccountApiTokens(),
+  );
+  const [mockServiceAccountSshPublicKeys, setMockServiceAccountSshPublicKeys] = createSignal(
+    seedMockServiceAccountSshPublicKeys(),
+  );
   const [mockPersonCertificates, setMockPersonCertificates] = createSignal<
     Record<string, PersonCertificate[]>
   >({});
@@ -271,6 +317,12 @@ export function ConsoleProvider(props: ParentProps) {
     state().people.find((person) => person.username === personId);
 
   const kanidmPersonId = (personId: string) => personForId(personId)?.username ?? personId;
+  const serviceAccountForId = (serviceAccountId: string) =>
+    state().serviceAccounts.find((serviceAccount) => serviceAccount.id === serviceAccountId) ??
+    state().serviceAccounts.find((serviceAccount) => serviceAccount.name === serviceAccountId);
+
+  const kanidmServiceAccountId = (serviceAccountId: string) =>
+    serviceAccountForId(serviceAccountId)?.name ?? serviceAccountId;
 
   async function bootstrapConfigAndData() {
     const loadedConfig = await loadDashboardConfig();
@@ -1797,6 +1849,421 @@ export function ConsoleProvider(props: ParentProps) {
     });
   };
 
+  const addServiceAccount = async (input: NewServiceAccountInput) => {
+    const serviceAccountName = input.name.trim();
+    if (config().dataSource.mode === "kanidm") {
+      const groupNames = groupIdsToNames(input.groups, state().groups);
+      const managedByName =
+        state().groups.find((group) => group.id === input.managedBy)?.name ?? input.managedBy;
+      const { loadedState } = await mutateKanidm("Creating Kanidm service account.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).createServiceAccount({
+          ...input,
+          managedBy: managedByName,
+          groups: groupNames,
+        }),
+      );
+      const created = loadedState.serviceAccounts.find(
+        (serviceAccount) => serviceAccount.name === serviceAccountName,
+      );
+      if (!created) {
+        throw new Error(
+          `Kanidm created ${serviceAccountName}, but it was not visible after reload.`,
+        );
+      }
+      return created;
+    }
+
+    const serviceAccount: ServiceAccount = {
+      id: nextId("svc", input.name),
+      name: input.name.trim(),
+      displayName: input.displayName.trim(),
+      description: input.description.trim(),
+      managedBy: input.managedBy,
+      groups: input.groups,
+      credential: {
+        password: "unknown",
+        apiTokens: 0,
+        sshKeys: 0,
+        unixCredential: false,
+      },
+      unix: { gidNumber: null, shell: "", credentialSet: false },
+      status: input.groups.length ? "ready" : "attention",
+    };
+
+    setState((previous) => ({
+      ...previous,
+      serviceAccounts: [...previous.serviceAccounts, serviceAccount],
+      groups: previous.groups.map((group) =>
+        input.groups.includes(group.id)
+          ? { ...group, members: [...new Set([...group.members, serviceAccount.id])] }
+          : group,
+      ),
+    }));
+
+    return serviceAccount;
+  };
+
+  const updateServiceAccount = async (serviceAccountId: string, patch: ServiceAccountPatch) => {
+    const serviceAccount = serviceAccountForId(serviceAccountId);
+    if (!serviceAccount) throw new Error("Service account not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      const managedByName =
+        patch.managedBy !== undefined
+          ? (state().groups.find((group) => group.id === patch.managedBy)?.name ?? patch.managedBy)
+          : undefined;
+      await mutateKanidm("Updating Kanidm service account.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateServiceAccount(kanidmServiceAccountId(serviceAccountId), {
+          ...patch,
+          managedBy: managedByName,
+        }),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      serviceAccounts: previous.serviceAccounts.map((candidate) =>
+        candidate.id === serviceAccount.id
+          ? {
+              ...candidate,
+              ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() } : {}),
+              ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+              ...(patch.managedBy !== undefined ? { managedBy: patch.managedBy } : {}),
+            }
+          : candidate,
+      ),
+    }));
+  };
+
+  const deleteServiceAccount = async (serviceAccountId: string) => {
+    const serviceAccount = serviceAccountForId(serviceAccountId);
+    if (!serviceAccount) throw new Error("Service account not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm service account.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteServiceAccount(serviceAccount.name),
+      );
+      return;
+    }
+
+    setMockServiceAccountApiTokens((previous) => {
+      const next = { ...previous };
+      delete next[serviceAccount.id];
+      return next;
+    });
+    setMockServiceAccountSshPublicKeys((previous) => {
+      const next = { ...previous };
+      delete next[serviceAccount.id];
+      return next;
+    });
+    setState((previous) => ({
+      ...previous,
+      serviceAccounts: previous.serviceAccounts.filter(
+        (candidate) => candidate.id !== serviceAccount.id,
+      ),
+      groups: previous.groups.map((group) => ({
+        ...group,
+        members: group.members.filter((memberId) => memberId !== serviceAccount.id),
+      })),
+    }));
+  };
+
+  const toggleServiceAccountGroup = async (serviceAccountId: string, groupId: string) => {
+    const current = state();
+    const serviceAccount = current.serviceAccounts.find(
+      (candidate) => candidate.id === serviceAccountId,
+    );
+    const group = current.groups.find((candidate) => candidate.id === groupId);
+    if (!serviceAccount || !group) return;
+
+    const isMember = serviceAccount.groups.includes(groupId);
+    if (config().dataSource.mode === "kanidm") {
+      const ds = new KanidmDataSource(
+        config().dataSource,
+        sessionStorage.getItem(bearerTokenKey) ?? undefined,
+      );
+      await mutateKanidm(
+        isMember
+          ? "Removing Kanidm service account group."
+          : "Adding Kanidm service account group.",
+        () =>
+          isMember
+            ? ds.removeGroupMembers(group.name, [serviceAccount.name])
+            : ds.addGroupMembers(group.name, [serviceAccount.name]),
+      );
+      return;
+    }
+
+    setState((previous) => ({
+      ...previous,
+      serviceAccounts: previous.serviceAccounts.map((candidate) =>
+        candidate.id === serviceAccountId
+          ? {
+              ...candidate,
+              groups: isMember
+                ? candidate.groups.filter((candidateGroupId) => candidateGroupId !== groupId)
+                : [...candidate.groups, groupId],
+              status: !isMember || candidate.credential.apiTokens > 0 ? "ready" : candidate.status,
+            }
+          : candidate,
+      ),
+      groups: previous.groups.map((candidate) =>
+        candidate.id === groupId
+          ? {
+              ...candidate,
+              members: isMember
+                ? candidate.members.filter((memberId) => memberId !== serviceAccountId)
+                : [...candidate.members, serviceAccountId],
+            }
+          : candidate,
+      ),
+    }));
+  };
+
+  const getServiceAccountApiTokens = async (serviceAccountId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm service account API tokens.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).serviceAccountApiTokens(kanidmServiceAccountId(serviceAccountId)),
+        { reportError: false },
+      );
+    }
+
+    return mockServiceAccountApiTokens()[serviceAccountId] ?? [];
+  };
+
+  const generateServiceAccountApiToken = async (
+    serviceAccountId: string,
+    input: ServiceAccountApiTokenInput,
+  ) => {
+    const trimmedLabel = input.label.trim();
+    if (!trimmedLabel) throw new Error("API token label is required.");
+
+    if (config().dataSource.mode === "kanidm") {
+      const { result } = await mutateKanidm("Generating Kanidm service account API token.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).generateServiceAccountApiToken(kanidmServiceAccountId(serviceAccountId), {
+          ...input,
+          label: trimmedLabel,
+        }),
+      );
+      return {
+        token: result,
+        tokens: await getServiceAccountApiTokens(serviceAccountId),
+      };
+    }
+
+    const tokenRecord: ServiceAccountApiToken = {
+      accountId: serviceAccountId,
+      tokenId: `00000000-0000-4000-a000-${Math.random().toString().slice(2, 14).padEnd(12, "0")}`,
+      label: trimmedLabel,
+      issuedAt: new Date().toISOString(),
+      expiry: input.expiry?.trim() || undefined,
+      purpose: input.readWrite ? "readwrite" : "readonly",
+    };
+    const nextTokens = [...(mockServiceAccountApiTokens()[serviceAccountId] ?? []), tokenRecord];
+    setMockServiceAccountApiTokens((previous) => ({
+      ...previous,
+      [serviceAccountId]: nextTokens,
+    }));
+    setState((previous) =>
+      updateServiceAccountTokenCount(previous, serviceAccountId, nextTokens.length),
+    );
+    return {
+      token: `svctok_${Math.random().toString(36).slice(2, 20)}`,
+      tokens: nextTokens,
+    };
+  };
+
+  const deleteServiceAccountApiToken = async (serviceAccountId: string, tokenId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm service account API token.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteServiceAccountApiToken(kanidmServiceAccountId(serviceAccountId), tokenId),
+      );
+      return getServiceAccountApiTokens(serviceAccountId);
+    }
+
+    const nextTokens = (mockServiceAccountApiTokens()[serviceAccountId] ?? []).filter(
+      (token) => token.tokenId !== tokenId,
+    );
+    setMockServiceAccountApiTokens((previous) => ({
+      ...previous,
+      [serviceAccountId]: nextTokens,
+    }));
+    setState((previous) =>
+      updateServiceAccountTokenCount(previous, serviceAccountId, nextTokens.length),
+    );
+    return nextTokens;
+  };
+
+  const getServiceAccountCredentialStatus = async (serviceAccountId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm service account credential status.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).serviceAccountCredentialStatus(kanidmServiceAccountId(serviceAccountId)),
+        { reportError: false },
+      );
+    }
+
+    return { checkedAt: new Date().toISOString(), reachable: true };
+  };
+
+  const generateServiceAccountPassword = async (serviceAccountId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      const { result } = await mutateKanidm("Generating Kanidm service account credential.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).generateServiceAccountPassword(kanidmServiceAccountId(serviceAccountId)),
+      );
+      return result;
+    }
+
+    const generatedAt = new Date().toISOString();
+    setState((previous) =>
+      updateServiceAccountCredentialState(previous, serviceAccountId, "present"),
+    );
+    return { checkedAt: generatedAt, generatedAt, reachable: true };
+  };
+
+  const getServiceAccountSshPublicKeys = async (serviceAccountId: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      return readKanidm(
+        "Reading Kanidm service account SSH public keys.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).serviceAccountSshPublicKeys(kanidmServiceAccountId(serviceAccountId)),
+        { reportError: false },
+      );
+    }
+
+    return mockServiceAccountSshPublicKeys()[serviceAccountId] ?? [];
+  };
+
+  const addServiceAccountSshPublicKey = async (
+    serviceAccountId: string,
+    tag: string,
+    key: string,
+  ) => {
+    const nextKey = { tag: tag.trim(), key: key.trim() };
+    if (!nextKey.tag || !nextKey.key) {
+      throw new Error("SSH key tag and public key are required.");
+    }
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Adding Kanidm service account SSH key.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).addServiceAccountSshPublicKey(
+          kanidmServiceAccountId(serviceAccountId),
+          nextKey.tag,
+          nextKey.key,
+        ),
+      );
+      return getServiceAccountSshPublicKeys(serviceAccountId);
+    }
+
+    const nextKeys = [
+      ...(mockServiceAccountSshPublicKeys()[serviceAccountId] ?? []).filter(
+        (item) => item.tag !== nextKey.tag,
+      ),
+      nextKey,
+    ];
+    setMockServiceAccountSshPublicKeys((previous) => ({
+      ...previous,
+      [serviceAccountId]: nextKeys,
+    }));
+    setState((previous) =>
+      updateServiceAccountSshKeyCount(previous, serviceAccountId, nextKeys.length),
+    );
+    return nextKeys;
+  };
+
+  const deleteServiceAccountSshPublicKey = async (serviceAccountId: string, tag: string) => {
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Deleting Kanidm service account SSH key.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).deleteServiceAccountSshPublicKey(kanidmServiceAccountId(serviceAccountId), tag),
+      );
+      return getServiceAccountSshPublicKeys(serviceAccountId);
+    }
+
+    const nextKeys = (mockServiceAccountSshPublicKeys()[serviceAccountId] ?? []).filter(
+      (item) => item.tag !== tag,
+    );
+    setMockServiceAccountSshPublicKeys((previous) => ({
+      ...previous,
+      [serviceAccountId]: nextKeys,
+    }));
+    setState((previous) =>
+      updateServiceAccountSshKeyCount(previous, serviceAccountId, nextKeys.length),
+    );
+    return nextKeys;
+  };
+
+  const extendServiceAccountUnixAccount = async (
+    serviceAccountId: string,
+    input: Pick<UnixAccountSettings, "gidNumber" | "shell">,
+  ) => {
+    const serviceAccount = serviceAccountForId(serviceAccountId);
+    if (!serviceAccount) throw new Error("Service account not found.");
+    const nextUnix: UnixAccountSettings = {
+      gidNumber: input.gidNumber,
+      shell: input.shell.trim(),
+      credentialSet:
+        serviceAccount.unix.credentialSet || input.gidNumber !== null || input.shell.trim() !== "",
+    };
+
+    if (config().dataSource.mode === "kanidm") {
+      const { loadedState } = await mutateKanidm(
+        "Updating Kanidm service account Unix settings.",
+        () =>
+          new KanidmDataSource(
+            config().dataSource,
+            sessionStorage.getItem(bearerTokenKey) ?? undefined,
+          ).extendServiceAccountUnixAccount(kanidmServiceAccountId(serviceAccountId), {
+            gidNumber: nextUnix.gidNumber,
+            shell: nextUnix.shell,
+          }),
+      );
+      return (
+        loadedState.serviceAccounts.find((candidate) => candidate.id === serviceAccountId)?.unix ??
+        nextUnix
+      );
+    }
+
+    setState((previous) => updateServiceAccountUnixAccount(previous, serviceAccountId, nextUnix));
+    return nextUnix;
+  };
+
   const addApplication = async (input: NewApplicationInput): Promise<CreatedApplication> => {
     if (config().dataSource.mode === "kanidm") {
       const appName = input.name.trim();
@@ -2118,6 +2585,8 @@ export function ConsoleProvider(props: ParentProps) {
   const resetDemoData = () => {
     mockRadiusPasswords = seedMockRadiusPasswords();
     setMockSshPublicKeys(seedMockSshPublicKeys());
+    setMockServiceAccountApiTokens(seedMockServiceAccountApiTokens());
+    setMockServiceAccountSshPublicKeys(seedMockServiceAccountSshPublicKeys());
     setMockPersonCertificates({});
     setMockUserAuthTokens(seedMockUserAuthTokens());
     setState({ ...initialState, branding: branding() });
@@ -2197,6 +2666,19 @@ export function ConsoleProvider(props: ParentProps) {
     updateGroup,
     addGroupMembers,
     removeGroupMembers,
+    addServiceAccount,
+    updateServiceAccount,
+    deleteServiceAccount,
+    toggleServiceAccountGroup,
+    getServiceAccountApiTokens,
+    generateServiceAccountApiToken,
+    deleteServiceAccountApiToken,
+    getServiceAccountCredentialStatus,
+    generateServiceAccountPassword,
+    getServiceAccountSshPublicKeys,
+    addServiceAccountSshPublicKey,
+    deleteServiceAccountSshPublicKey,
+    extendServiceAccountUnixAccount,
     addApplication,
     updateApplication,
     deleteApplication,
@@ -2461,6 +2943,7 @@ export function createUnauthenticatedState(
       theme: config.theme,
     },
     people: [anonymousPerson],
+    serviceAccounts: [],
     groups: [],
     apps: [],
   };
@@ -2534,6 +3017,37 @@ function seedMockSshPublicKeys(): Record<string, SshPublicKey[]> {
   );
 }
 
+function seedMockServiceAccountApiTokens(): Record<string, ServiceAccountApiToken[]> {
+  return Object.fromEntries(
+    initialState.serviceAccounts.map((serviceAccount) => [
+      serviceAccount.id,
+      Array.from({ length: serviceAccount.credential.apiTokens }, (_, index) => ({
+        accountId: serviceAccount.id,
+        tokenId: `00000000-0000-4000-a100-${String(index + 1).padStart(12, "0")}`,
+        label: index === 0 ? "deployment token" : `automation token ${index + 1}`,
+        issuedAt: new Date(Date.now() - (index + 1) * 86_400_000).toISOString(),
+        expiry: index === 0 ? undefined : new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        purpose: index === 0 ? "readwrite" : "readonly",
+      })),
+    ]),
+  );
+}
+
+function seedMockServiceAccountSshPublicKeys(): Record<string, SshPublicKey[]> {
+  return Object.fromEntries(
+    initialState.serviceAccounts.map((serviceAccount) => [
+      serviceAccount.id,
+      Array.from({ length: serviceAccount.credential.sshKeys }, (_, index) => {
+        const tag = index === 0 ? "deploy-host" : `service-key-${index + 1}`;
+        return {
+          tag,
+          key: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${serviceAccount.name}${index}DemoPublicKey ${tag}`,
+        };
+      }),
+    ]),
+  );
+}
+
 function seedMockUserAuthTokens(): UserAuthTokenStatus[] {
   return initialState.people.flatMap((person, index) => [
     {
@@ -2585,6 +3099,87 @@ function updateUnixAccount(
             },
           }
         : person,
+    ),
+  };
+}
+
+function updateServiceAccountTokenCount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  count: number,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            credential: { ...serviceAccount.credential, apiTokens: count },
+            status: count > 0 ? "ready" : serviceAccount.status,
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
+function updateServiceAccountSshKeyCount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  count: number,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            credential: { ...serviceAccount.credential, sshKeys: count },
+            status: count > 0 ? "ready" : serviceAccount.status,
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
+function updateServiceAccountCredentialState(
+  state: ConsoleState,
+  serviceAccountId: string,
+  password: ServiceAccountCredentialState,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            credential: { ...serviceAccount.credential, password },
+            status: password === "present" ? "ready" : serviceAccount.status,
+          }
+        : serviceAccount,
+    ),
+  };
+}
+
+function updateServiceAccountUnixAccount(
+  state: ConsoleState,
+  serviceAccountId: string,
+  unix: UnixAccountSettings,
+): ConsoleState {
+  return {
+    ...state,
+    serviceAccounts: state.serviceAccounts.map((serviceAccount) =>
+      serviceAccount.id === serviceAccountId
+        ? {
+            ...serviceAccount,
+            unix,
+            credential: {
+              ...serviceAccount.credential,
+              unixCredential:
+                unix.credentialSet || unix.gidNumber !== null || unix.shell.trim().length > 0,
+            },
+            status: "ready",
+          }
+        : serviceAccount,
     ),
   };
 }

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Show } from "solid-js";
+import { createEffect, createMemo, Show } from "solid-js";
 import type { ParentProps } from "solid-js";
 import {
   AppWindow,
@@ -10,6 +10,7 @@ import {
   Link as LinkIcon,
   LogOut,
   Moon,
+  ServerCog,
   ShieldCheck,
   Sun,
   UsersRound,
@@ -41,8 +42,10 @@ import { GroupsPage } from "./pages/admin/groups";
 import { NewApplicationPage } from "./pages/admin/new-app";
 import { NewGroupPage } from "./pages/admin/new-group";
 import { NewPersonPage } from "./pages/admin/new-person";
+import { NewServiceAccountPage } from "./pages/admin/new-service-account";
 import { PeoplePage } from "./pages/admin/people";
 import { RelationshipsPage } from "./pages/admin/relationships";
+import { ServiceAccountsPage } from "./pages/admin/service-accounts";
 
 function App() {
   return (
@@ -127,6 +130,8 @@ function SwitchPrivate() {
     if (currentPath === "/admin") return <AdminOverviewPage />;
     if (currentPath === "/admin/people") return <PeoplePage />;
     if (currentPath === "/admin/people/new") return <NewPersonPage />;
+    if (currentPath === "/admin/service-accounts") return <ServiceAccountsPage />;
+    if (currentPath === "/admin/service-accounts/new") return <NewServiceAccountPage />;
     if (currentPath === "/admin/groups") return <GroupsPage />;
     if (currentPath === "/admin/groups/new") return <NewGroupPage />;
     if (currentPath === "/admin/apps") return <ApplicationsPage />;
@@ -214,6 +219,9 @@ function AdminRail() {
       </NavLink>
       <NavLink href="/admin/people">
         <UsersRound size={17} /> People
+      </NavLink>
+      <NavLink href="/admin/service-accounts">
+        <ServerCog size={17} /> Service accounts
       </NavLink>
       <NavLink href="/admin/groups">
         <GitBranch size={17} /> Groups

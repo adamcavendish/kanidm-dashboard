@@ -105,6 +105,11 @@ export function PeoplePage() {
     const person = selectedPerson();
     return person ? getAccessForPerson(person.id) : [];
   });
+  const selectedGroups = createMemo(() => {
+    const person = selectedPerson();
+    if (!person) return [];
+    return state().groups.filter((group) => person.groups.includes(group.id));
+  });
   let adminRefreshRequest = 0;
 
   function setStatusChoice(nextStatus: UserStatus) {
@@ -637,6 +642,22 @@ export function PeoplePage() {
               </Show>
 
               <GlassPanel title="Groups and access">
+                <div class="membership-summary">
+                  <h4>Direct memberships</h4>
+                  <Show
+                    when={selectedGroups().length}
+                    fallback={<p class="muted">No direct group memberships.</p>}
+                  >
+                    <div class="chip-row">
+                      <For each={selectedGroups()}>
+                        {(group) => <span class="chip">{group.displayName}</span>}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+                <div class="membership-summary">
+                  <h4>Membership controls</h4>
+                </div>
                 <div class="group-toggle-grid">
                   <For each={state().groups}>
                     {(group) => (

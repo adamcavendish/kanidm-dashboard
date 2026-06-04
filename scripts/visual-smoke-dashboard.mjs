@@ -33,6 +33,8 @@ const privateRoutes = [
   { path: "/admin", readyText: "Operations overview" },
   { path: "/admin/people", readyText: "People" },
   { path: "/admin/people/new", readyText: "Add user" },
+  { path: "/admin/service-accounts", readyText: "Service accounts" },
+  { path: "/admin/service-accounts/new", readyText: "Add service account" },
   { path: "/admin/groups", readyText: "Groups" },
   { path: "/admin/groups/new", readyText: "Add group" },
   { path: "/admin/apps", readyText: "Applications" },
