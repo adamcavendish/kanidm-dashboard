@@ -351,9 +351,9 @@ Use the running Vite+ dev server (`vp dev`) for interactive checks.
     same-origin `/oauth-test-callback` redirect URI only so Playwright can
     capture the authorization-code redirect without running a separate Orb
     Chrysa server.
-  - Live Orb Chrysa `/oauth2/start` to `/oauth2/callback` token exchange is not
-    proven yet. The current blocker, prompt for the Orb Chrysa repo, and the
-    follow-up gate are tracked in
+  - Live Orb Chrysa `/oauth2/start` to `/oauth2/callback` token exchange passed
+    after the Orb Chrysa setup mapping fix. The setup and follow-up gate are
+    tracked in
     `docs/test-plans/orb-chrysa-live-oauth.md`.
 - Account recovery:
   - Mock mode shows a privacy-preserving success response after submitting a
@@ -623,7 +623,7 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
   groups, and nested relationships: pass
 - Visual smoke populated Orb Chrysa scope-map editor on `/admin/apps/new`: pass
 - Live Orb Chrysa `/oauth2/start` to `/oauth2/callback` sample-app token
-  exchange: blocked by the Orb Chrysa setup mismatch documented in
+  exchange: passed after the Orb Chrysa setup mapping fix documented in
   `docs/test-plans/orb-chrysa-live-oauth.md`
 
 Screenshots from the latest local browser verification:
@@ -652,11 +652,9 @@ Screenshots from the latest local browser verification:
   `vp run e2e-kanidm`, `vp run e2e-webauthn-kanidm`, and
   `vp run e2e-recovery-mail-kanidm` passed on the running 1.10.3 compose stack.
   Re-run them after any Kanidm API or admin-flow change.
-- Orb Chrysa live sample-app OAuth has not passed yet. The dashboard verifies
-  Kanidm-native OAuth discovery, consent, callback preservation, access denial,
-  and Orb Chrysa-shaped app creation, but it has not driven the separate Orb
-  Chrysa app through code exchange and session creation. The current blocker is
-  documented in `docs/test-plans/orb-chrysa-live-oauth.md`.
+- Orb Chrysa live sample-app OAuth passed after the setup mapping fix. The
+  dashboard also verifies Kanidm-native OAuth discovery, consent, callback
+  preservation, access denial, and Orb Chrysa-shaped app creation.
 - Passkey and attested-passkey reset-token setup/removal is implemented with
   Kanidm `passkeyinit`/`passkeyfinish`, `attestedpasskeyinit`/
   `attestedpasskeyfinish`, `{ "passkeyremove": uuid }`, and
