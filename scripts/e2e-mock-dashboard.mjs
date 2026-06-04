@@ -217,7 +217,10 @@ async function verifyCredentialIntent(page) {
   if (!issueCount) throw new Error("No Issue reset buttons were found.");
 
   await issueButtons.first().click();
-  await page.getByRole("button", { name: "Issue token" }).click();
+  const issueToken = page.getByRole("button", { name: "Issue token" });
+  if ((await issueToken.count()) > 0) {
+    await issueToken.click();
+  }
   await page.getByLabel("Token").waitFor();
   const adminToken = await page.getByLabel("Token").inputValue();
   const resetUrl = await page.getByLabel("Reset URL").inputValue();
@@ -311,6 +314,31 @@ async function verifyCredentialIntent(page) {
   }
 }
 
+async function verifySelfServiceCredentialCompletion(page) {
+  await openCredentials(page);
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page
+    .getByText("Credential update session started. Add or remove passkeys below.")
+    .waitFor();
+  await page.getByRole("button", { name: "Start passkey" }).click();
+  await page
+    .getByText("Passkey setup started. Complete browser registration before commit.")
+    .waitFor();
+  await page.getByLabel("Passkey label").fill("Portal CI passkey");
+  await page.getByRole("button", { name: /^Register passkey$/ }).click();
+  await page.getByText("Passkey staged. Review the update, then commit.").waitFor();
+  await page.getByRole("button", { name: "Regenerate backup codes" }).click();
+  await page.getByText("Backup codes staged. Store them securely, then commit.").waitFor();
+  await page
+    .locator('[aria-label="Generated backup codes"]')
+    .getByText(/^backup-1-/)
+    .waitFor();
+  await page.getByRole("button", { name: "Remove backup codes" }).click();
+  await page.getByText("Backup code removal staged. Review the update, then commit.").waitFor();
+  await page.getByRole("button", { name: "Cancel update" }).click();
+  await page.getByText("Credential update cancelled.").waitFor();
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   let page = await browser.newPage();
@@ -340,6 +368,7 @@ try {
   await verifyUnixCredential(page);
   await verifySshKeys(page);
   await verifyCredentialIntent(page);
+  await verifySelfServiceCredentialCompletion(page);
   await page.screenshot({ path: screenshotPath, fullPage: false });
 
   console.log(

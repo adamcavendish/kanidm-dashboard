@@ -148,8 +148,10 @@ export interface DashboardDataSource {
 
 export class KanidmDataSource implements DashboardDataSource {
   readonly config: Configuration;
+  private readonly bearerToken?: string;
 
   constructor(config: DashboardDataSourceConfig, bearerToken?: string) {
+    this.bearerToken = bearerToken;
     this.config = new Configuration({
       basePath: config.apiBasePath.replace(/\/$/, ""),
       credentials: "include",
@@ -859,13 +861,27 @@ export class KanidmDataSource implements DashboardDataSource {
   }
 
   async credentialUpdateIntent(id: string, ttl: number): Promise<CredentialUpdateIntent> {
-    const r = await new PersonCredentialApi(this.config).personIdCredentialUpdateIntentTtlGet({
+    const path = `/v1/person/${encodeURIComponent(
       id,
-      ttl,
+    )}/_credential/_update_intent/${encodeURIComponent(String(ttl))}`;
+    const res = await fetch(`${this.config.basePath}${path}`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {}),
+      },
     });
+    if (!res.ok) throw await kanidmHttpError(path, res);
+    const text = await res.text();
+    const r = JSON.parse(text) as { token: string; expiryTime?: string; expiry_time?: string };
+    const expiryTime = r.expiryTime ?? r.expiry_time;
+    if (!r.token || !expiryTime) {
+      throw new Error("Credential update intent response was missing token or expiry time.");
+    }
     return {
       token: r.token,
-      expiryTime: r.expiryTime,
+      expiryTime,
     };
   }
 

@@ -35,6 +35,7 @@ const logs = [];
 const apiResponses = [];
 const failedResponses = [];
 const responseCaptureTasks = [];
+const expectedLivePolicyFailures = new Set();
 const cleanupResults = [];
 let domainBrandingResult = {
   domainBrandingWritable: false,
@@ -46,6 +47,11 @@ let nativeOAuthResult = {
   nativeOAuthDiscoveryVerified: false,
   nativeOAuthConsentVerified: false,
   nativeOAuthAccessDeniedVerified: false,
+};
+let credentialSelfServiceResult = {
+  credentialSelfServiceVerified: false,
+  credentialSelfServicePolicyDenied: false,
+  credentialSelfServiceBackupCodesVerified: false,
 };
 let maintenancePagesVerified = false;
 let userTotpSecret = "";
@@ -99,6 +105,7 @@ function expectedPolicyFailure(responseLine) {
     expectedGroupMetadataDenial ||
     expectedMissingGroupPolicyAttr ||
     expectedNonUnixGroupToken ||
+    expectedLivePolicyFailures.has(responseLine) ||
     (responseLine.startsWith("403 ") && responseLine.includes("/v1/person")) ||
     (responseLine.startsWith("403 ") &&
       (responseLine.includes("/_radius") ||
@@ -110,6 +117,18 @@ function expectedPolicyFailure(responseLine) {
     (responseLine.startsWith("405 ") && responseLine.includes("/_user_auth_token")) ||
     // 401 on initial page load when session storage has not-expired-yet token
     (responseLine.startsWith("401 ") && responseLine.includes("/v1/self"))
+  );
+}
+
+function isCredentialSelfServiceDenial(status, body) {
+  const lower = String(body).toLowerCase();
+  return (
+    status === 401 ||
+    status === 403 ||
+    (status === 500 &&
+      (lower.includes("notauthorised") ||
+        lower.includes("not authorised") ||
+        lower.includes("notauthorized")))
   );
 }
 
@@ -658,6 +677,7 @@ async function verifyNormalUserPortal(page) {
 
   await verifyRadiusPassword(page);
   await verifySshPublicKeys(page);
+  credentialSelfServiceResult = await verifyCredentialSelfService(page);
   await verifyReauth(page);
   await verifySessionRevoke(page);
   await verifyUnixCredential(page);
@@ -712,6 +732,88 @@ async function verifyNonAdminMutationDenied(page) {
       `Non-admin person create returned HTTP ${result.status}, expected 401 or 403: ${result.body}`,
     );
   }
+}
+
+async function verifyCredentialSelfService(page) {
+  await page.goto(appUrl("/credentials"), { waitUntil: "domcontentloaded" });
+  await page.waitForURL(/\/credentials$/, { timeout: 10000 });
+  await page.getByRole("heading", { name: "Credentials" }).waitFor({ timeout: 10000 });
+  if ((await page.locator(".admin-rail").count()) !== 0) {
+    throw new Error("Admin rail rendered on non-admin credential self-service.");
+  }
+
+  const updateIntentPath = `/v1/person/${encodeURIComponent(
+    personName,
+  )}/_credential/_update_intent/`;
+  const updateIntentResponse = page
+    .waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && response.url().includes(updateIntentPath),
+      { timeout: 30000 },
+    )
+    .catch(() => null);
+
+  await page.getByRole("button", { name: "Manage" }).click();
+  const outcome = await page
+    .waitForFunction(
+      () => {
+        const text = document.body.textContent ?? "";
+        if (text.includes("Kanidm denied credential self-service for this account")) {
+          return "denied";
+        }
+        if (text.includes("Credential update session started")) return "active";
+        return "";
+      },
+      null,
+      { timeout: 30000 },
+    )
+    .then((handle) => handle.jsonValue());
+
+  const intentResponse = await updateIntentResponse;
+  if (!intentResponse) {
+    throw new Error("Credential self-service did not request a Kanidm update intent.");
+  }
+
+  if (outcome === "denied") {
+    const body = await responseTextWithTimeout(intentResponse);
+    if (!isCredentialSelfServiceDenial(intentResponse.status(), body)) {
+      throw new Error(
+        `Credential self-service showed a denial for HTTP ${intentResponse.status()}: ${body}`,
+      );
+    }
+    expectedLivePolicyFailures.add(`${intentResponse.status()} ${intentResponse.url()}`);
+    return {
+      credentialSelfServiceVerified: false,
+      credentialSelfServicePolicyDenied: true,
+      credentialSelfServiceBackupCodesVerified: false,
+    };
+  }
+
+  if (!intentResponse.ok()) {
+    throw new Error(
+      `Credential self-service update intent returned HTTP ${intentResponse.status()}.`,
+    );
+  }
+
+  await page.getByRole("button", { name: "Regenerate backup codes" }).click();
+  await page.waitForFunction(
+    () => {
+      const text = document.body.textContent ?? "";
+      return text.includes("Backup codes staged.");
+    },
+    null,
+    { timeout: 30000 },
+  );
+  const cancelButton = page.getByRole("button", { name: "Cancel update" });
+  if ((await cancelButton.count()) > 0 && (await cancelButton.isEnabled())) {
+    await cancelButton.click();
+    await page.getByText("Credential update cancelled.").waitFor({ timeout: 30000 });
+  }
+  return {
+    credentialSelfServiceVerified: true,
+    credentialSelfServicePolicyDenied: false,
+    credentialSelfServiceBackupCodesVerified: true,
+  };
 }
 
 async function verifyReauth(page) {
@@ -1149,6 +1251,7 @@ async function main() {
           groupMembershipToggleVerified: true,
           radiusSelfServiceVerified: true,
           sshKeysVerified: true,
+          ...credentialSelfServiceResult,
           reauthVerified: true,
           sessionRevokeVerified: true,
           unixSelfServiceVerified: true,

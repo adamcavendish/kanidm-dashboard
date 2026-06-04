@@ -86,6 +86,7 @@ interface ConsoleContextValue {
   apiStatus: Accessor<ApiStatus>;
   branding: Accessor<BrandingSettings>;
   currentUser: Accessor<Person>;
+  refreshSessionData: () => Promise<void>;
   loginWithPassword: (
     username: string,
     password: string,
@@ -405,6 +406,34 @@ export function ConsoleProvider(props: ParentProps) {
       });
     }
   }
+
+  const refreshSessionData = async () => {
+    const loadedConfig = config();
+    if (loadedConfig.dataSource.mode !== "kanidm") {
+      setState(readMockState(loadedConfig));
+      return;
+    }
+
+    const token = sessionStorage.getItem(bearerTokenKey);
+    if (!token) {
+      clearKanidmSession("Kanidm session expired. Sign in again.");
+      throw new Error("Kanidm refresh requires an authenticated bearer token.");
+    }
+
+    setApiStatus({
+      mode: "kanidm",
+      state: "loading",
+      message: "Refreshing Kanidm identity data.",
+    });
+    const dataSource = new KanidmDataSource(loadedConfig.dataSource, token);
+    const loadedState = applyDashboardBrandingFallback(await dataSource.load(), loadedConfig);
+    setState(loadedState);
+    setApiStatus({
+      mode: "kanidm",
+      state: "ready",
+      message: "Loaded real Kanidm data from the same-origin API.",
+    });
+  };
 
   const getGroupsForPerson = (personId: string) => {
     const current = state();
@@ -2823,6 +2852,7 @@ export function ConsoleProvider(props: ParentProps) {
     apiStatus,
     branding,
     currentUser,
+    refreshSessionData,
     loginWithPassword,
     startPasskeyLogin,
     finishPasskeyLogin,

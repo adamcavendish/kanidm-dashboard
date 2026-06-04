@@ -44,7 +44,7 @@ export function CredentialUpdateStatusPanel(props: { status: CredentialUpdateSta
       <KeyValue label="SPN" value={props.status.spn} />
       <KeyValue label="Commit allowed" value={props.status.canCommit ? "Yes" : "No"} />
       <Show when={props.status.warnings.length}>
-        <div class="review-box danger">
+        <div class="review-box danger" role="alert" aria-live="assertive">
           <CircleAlert size={18} />
           <span>{props.status.warnings.join(", ")}</span>
         </div>

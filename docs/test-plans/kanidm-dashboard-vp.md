@@ -483,6 +483,12 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
   - `/reset` can stage backup-code generation/removal through Kanidm
     `/v1/credential/_update` with `backupcodegenerate` and `backupcoderemove`
     requests.
+  - `/credentials` can start a current-user credential update session and stage
+    backup-code generation when Kanidm policy allows it.
+  - If Kanidm denies current-user credential self-service, `/credentials` stays
+    in the portal surface and shows the policy denial. Live e2e records this as
+    `credentialSelfServicePolicyDenied` rather than
+    `credentialSelfServiceVerified`.
   - `/reset` can start TOTP setup, display the Kanidm-generated secret and
     `otpauth://` URI, verify a numeric code with a device label, handle retry
     and duplicate-name states, accept SHA1 only after Kanidm requests it, remove
@@ -505,6 +511,10 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
     against local Kanidm 1.10.3; object payloads fail deserialization.
   - `/reset` can cancel a verified credential update session.
   - Self-service `/enrol` can generate an intent URL for the current user in mock mode.
+  - Self-service `/credentials` starts the current-user credential update path for passkey
+    and backup-code management. Mock e2e stages passkey and backup-code updates through the
+    credential update state machine; live e2e accepts either a started session or Kanidm's
+    current-user self-service denial message.
 - Theme toggle must work in both dark and light modes.
 - API error states need desktop and mobile spot checks before production.
 
@@ -656,6 +666,11 @@ Screenshots from the latest local browser verification:
 - Passkey login is wired to Kanidm stepped auth. Unit tests cover the payloads,
   mock E2E covers the UI path, and `vp run e2e-webauthn-kanidm` verifies real
   Kanidm passkey login with a Playwright virtual authenticator.
+- `/credentials` now exposes passkey management and backup-code regeneration
+  through credential update sessions. Local live Kanidm 1.10.3 denies
+  `idm_admin` current-user intent creation with `500 "notauthorised"`, and the
+  dashboard surfaces that as a self-service policy denial while staying on the
+  portal credentials page.
 - Password-plus-security-key login is wired to Kanidm stepped auth with
   security-key assertion first and password second. Unit tests cover the payloads,
   and mock E2E covers the UI path. Real Kanidm coverage still needs a local
