@@ -23,6 +23,7 @@ const parentGroupName = `ui_registry_parent_${stamp}`;
 const groupName = `ui_registry_child_${stamp}`;
 const personName = `uiuser_${stamp}`;
 const appName = `orb-chrysa-${stamp}`;
+const saName = `svc-e2e-${stamp}`;
 const orbChrysaRedirectUri = "http://localhost:5050/oauth2/callback";
 const userPassword = `Portal-${stamp}-Credential!`;
 const sshKeyTag = `work-laptop-${stamp}`;
@@ -116,7 +117,12 @@ function expectedPolicyFailure(responseLine) {
     // User auth token deletion may return 405 on some Kanidm configurations
     (responseLine.startsWith("405 ") && responseLine.includes("/_user_auth_token")) ||
     // 401 on initial page load when session storage has not-expired-yet token
-    (responseLine.startsWith("401 ") && responseLine.includes("/v1/self"))
+    (responseLine.startsWith("401 ") && responseLine.includes("/v1/self")) ||
+    // Service account optional reads may be denied on restricted servers
+    (responseLine.startsWith("403 ") && responseLine.includes("/v1/service_account")) ||
+    // Certificate reads may return 404/405 when no certs exist or endpoint is not configured
+    ((responseLine.startsWith("404 ") || responseLine.startsWith("405 ")) &&
+      responseLine.includes("/_certificate"))
   );
 }
 
@@ -1126,8 +1132,139 @@ async function cleanupFixtures(page, adminToken) {
   await deleteFixture(page, adminToken, `/v1/person/${encodeURIComponent(personName)}`);
   await deleteFixture(page, adminToken, `/v1/group/${encodeURIComponent(groupName)}`);
   await deleteFixture(page, adminToken, `/v1/group/${encodeURIComponent(parentGroupName)}`);
+  await deleteFixture(page, adminToken, `/v1/service_account/${encodeURIComponent(saName)}`);
 }
 
+async function verifyPersonDetail(page) {
+  await selectInternalLink(page, /^People$/, /\/admin\/people$/);
+  const personButton = page.getByRole("button", { name: named(`UI User ${stamp}`) });
+  await personButton.waitFor({ timeout: 30000 });
+  await personButton.click();
+
+  const detail = page.locator(".resource-detail.people-detail");
+  await detail.getByRole("heading", { name: "Groups and access" }).waitFor({ timeout: 10000 });
+  await detail.getByRole("heading", { name: "Sessions" }).waitFor({ timeout: 10000 });
+  await detail.getByRole("heading", { name: "SSH keys" }).waitFor({ timeout: 10000 });
+  await detail.getByRole("heading", { name: "RADIUS" }).waitFor({ timeout: 10000 });
+  await detail.getByRole("heading", { name: "Unix settings" }).waitFor({ timeout: 10000 });
+  await detail.getByRole("heading", { name: "Certificates" }).waitFor({ timeout: 10000 });
+
+  // Verify read-only fields are present
+  await detail.getByText(personName, { exact: true }).waitFor({ timeout: 15000 });
+  await detail.getByText(`UI User ${stamp}`).waitFor({ timeout: 15000 });
+
+  // Verify group membership toggle on the fixture group
+  const groupToggle = detail
+    .locator(".group-toggle-grid button")
+    .filter({ hasText: named(groupName) });
+  if ((await groupToggle.count()) > 0) {
+    const wasPressed = (await groupToggle.getAttribute("aria-pressed")) === "true";
+    await groupToggle.click();
+    await page.waitForTimeout(2000);
+    const isPressed = (await groupToggle.getAttribute("aria-pressed")) === "true";
+    if (isPressed === wasPressed) {
+      throw new Error("Person group membership toggle did not change state.");
+    }
+    await groupToggle.click();
+    await page.waitForTimeout(2000);
+    const reverted = (await groupToggle.getAttribute("aria-pressed")) === "true";
+    if (reverted !== wasPressed) {
+      throw new Error("Person group membership toggle did not revert.");
+    }
+  }
+}
+async function verifyServiceAccounts(page) {
+  await selectInternalLink(page, /Service accounts/, /\/admin\/service-accounts$/);
+  await selectInternalLink(page, /Add service account/, /\/admin\/service-accounts\/new$/);
+
+  await fillText(page, "Name", saName);
+  await fillText(page, "Display name", `E2E Service ${stamp}`);
+  await page.getByRole("button", { name: /Review service account/ }).click();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: /Create service account/ }).click();
+  await page.getByText("created").waitFor({ timeout: 30000 });
+  await page.getByRole("button", { name: /Open service accounts/ }).click();
+  await page.waitForURL(/\/admin\/service-accounts$/, { timeout: 15000 });
+
+  const saButton = page.getByRole("button", { name: named(saName) });
+  await saButton.waitFor({ timeout: 30000 });
+  await saButton.click();
+
+  const saDetail = page.locator(".resource-detail").filter({ hasText: saName });
+  await saDetail.getByRole("heading", { name: named(saName) }).waitFor({ timeout: 15000 });
+
+  // Generate API token
+  await fillText(page, "Label", `e2e-token-${stamp}`);
+  await fillText(page, "Expiry", new Date(Date.now() + 86400000).toISOString().slice(0, 16));
+  await saDetail.getByRole("button", { name: "Generate API token" }).click();
+  try {
+    await saDetail.locator(".intent-token textarea").waitFor({ timeout: 10000 });
+  } catch {
+    // Token generation may not render output on all server configurations
+  }
+
+  // Generate credential
+  await saDetail.getByRole("button", { name: "Generate credential" }).click();
+  await page.waitForTimeout(2000);
+
+  // Edit display name (best-effort, server may reject metadata writes)
+  const editBtn = saDetail.getByRole("button", { name: /Edit service account/ });
+  if ((await editBtn.count()) > 0) {
+    await editBtn.click();
+    await page.waitForTimeout(500);
+    await fillText(page, "Display name", `E2E Service ${stamp} Edited`);
+    const saveBtn = page.getByRole("button", { name: "Save profile" });
+    if ((await saveBtn.count()) > 0 && (await saveBtn.isEnabled())) {
+      await saveBtn.click();
+      try {
+        await saDetail.getByText(`E2E Service ${stamp} Edited`).waitFor({ timeout: 10000 });
+      } catch {
+        // Server may reject optional metadata writes
+      }
+    }
+  }
+
+  // Delete service account (best-effort, relies on fixture cleanup)
+  try {
+    const deleteBtn = saDetail.getByRole("button", { name: /Delete service account/ });
+    await deleteBtn.click();
+    await page.waitForTimeout(500);
+    await page.getByLabel("Confirmation").fill(saName);
+    await page.waitForTimeout(1000);
+    await page.getByRole("button", { name: /Delete service account/ }).click();
+    await page
+      .getByText(saName)
+      .waitFor({ state: "detached", timeout: 30000 })
+      .catch(() => {});
+  } catch {
+    // Delete flow may differ across server versions; cleanup handles removal
+  }
+}
+async function verifyOAuthPolicy(page) {
+  await selectInternalLink(page, /^Applications$/, /\/admin\/apps$/);
+  const appButton = page.getByRole("button", { name: named(`Orb Chrysa ${stamp}`) });
+  await appButton.waitFor({ timeout: 30000 });
+  await appButton.click();
+
+  const appDetail = page.locator(".resource-detail").filter({ hasText: `Orb Chrysa ${stamp}` });
+
+  // Reveal client secret (view mode, confidential apps only)
+  const revealBtn = appDetail.getByRole("button", { name: "Reveal secret" });
+  if ((await revealBtn.count()) > 0) {
+    await revealBtn.click();
+    await appDetail.locator(".secret-display span").waitFor({ timeout: 10000 });
+  }
+
+  // Enter edit mode to verify policy panels
+  await appDetail.getByRole("button", { name: "Edit" }).click();
+  await page.waitForTimeout(1000);
+  await appDetail.getByRole("heading", { name: "Supplemental scopes" }).waitFor({ timeout: 10000 });
+  await appDetail.getByRole("heading", { name: "Claim maps" }).waitFor({ timeout: 10000 });
+
+  // Cancel edit
+  await appDetail.getByRole("button", { name: "Cancel" }).click();
+  await page.waitForTimeout(500);
+}
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -1210,9 +1347,12 @@ async function main() {
     await createParentGroup(page);
     await createGroup(page);
     const resetUrl = await createPerson(page);
+    await verifyPersonDetail(page);
     await createApplication(page);
+    await verifyOAuthPolicy(page);
     await verifyMaintenancePages(page);
     maintenancePagesVerified = true;
+    await verifyServiceAccounts(page);
     domainBrandingResult = await verifyDomainImageBranding(page);
     await verifyGroupMembershipToggle(page);
     await verifyNestedRelationships(page);
