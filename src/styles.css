@@ -1008,6 +1008,43 @@ td small {
   margin-top: 5px;
   color: var(--muted);
   font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.credential-meter .info-trigger {
+  cursor: pointer;
+  display: inline-flex;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.credential-meter .info-trigger:hover {
+  opacity: 1;
+}
+
+.credential-signal-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.credential-signal-list li {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+.credential-signal-list .signal-ok {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+.credential-signal-list .signal-missing {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .credential-meter.compact {
