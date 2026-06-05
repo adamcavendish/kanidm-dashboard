@@ -26,15 +26,21 @@ export function CredentialMeter(props: { person: Person; compact?: boolean }) {
       <Show when={!props.compact}>
         <small>
           {score()}/{checks().length} healthy signals{" "}
-          <span class="info-trigger" onClick={() => setShowInfo(!showInfo())}>
+          <button
+            class="info-trigger"
+            type="button"
+            aria-label="Credential signal details"
+            aria-expanded={showInfo()}
+            onClick={() => setShowInfo(!showInfo())}
+          >
             <Info size={12} />
-          </span>
+          </button>
         </small>
         <Show when={showInfo()}>
           <ul class="credential-signal-list">
             {checks().map((ok, i) => (
               <li class={ok ? "signal-ok" : "signal-missing"}>
-                <strong>{SIGNALS[i]!.label}</strong>
+                <strong>{SIGNALS[i]!.label}:</strong>
                 <span>{SIGNALS[i]!.meaning}</span>
               </li>
             ))}

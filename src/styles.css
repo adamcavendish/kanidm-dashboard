@@ -1018,6 +1018,10 @@ td small {
   display: inline-flex;
   opacity: 0.6;
   transition: opacity 0.15s;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
 }
 .credential-meter .info-trigger:hover {
   opacity: 1;
@@ -1036,6 +1040,9 @@ td small {
   padding: 2px 7px;
   border-radius: 999px;
   font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .credential-signal-list .signal-ok {
   background: color-mix(in srgb, var(--success) 18%, transparent);
