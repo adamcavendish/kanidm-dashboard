@@ -34,6 +34,17 @@ export function credentialLabel(status: Person["credential"]["password"]) {
 }
 
 export function formatDateTime(value: string) {
+  if (!value) return "Unknown";
+  // Unix timestamp (seconds since epoch) — convert to milliseconds
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) {
+      return new Date(seconds * 1000).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    }
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString(undefined, {

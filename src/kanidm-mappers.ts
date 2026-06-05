@@ -91,7 +91,7 @@ export interface KanidmUserAuthTokenStatus {
   account_id?: string;
   uuid?: string;
   session_id?: string;
-  issued_at?: string;
+  issued_at?: string | number;
   purpose?: string;
   expiry?: string;
   state?: "neverexpires" | "revoked" | { expiresat: string };
@@ -635,7 +635,7 @@ export function mapUserAuthTokenStatus(token: KanidmUserAuthTokenStatus): UserAu
   return {
     accountId: token.account_id ?? token.uuid ?? "",
     sessionId: token.session_id ?? "",
-    issuedAt: token.issued_at ?? "",
+    issuedAt: token.issued_at != null ? String(token.issued_at) : "",
     purpose: token.purpose ?? "unknown",
     state,
   };
