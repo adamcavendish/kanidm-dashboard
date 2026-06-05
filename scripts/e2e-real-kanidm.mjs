@@ -486,9 +486,11 @@ async function createApplication(page) {
   await page
     .getByLabel("Redirect URIs")
     .fill(`${orbChrysaRedirectUri}\n${nativeOAuthCallbackUrl()}`);
-  await page.getByRole("button", { name: named("oci_admin") }).click();
-  await page.getByRole("button", { name: named("oci_push") }).click();
-  await page.getByRole("button", { name: named("oci_pull") }).click();
+  // Extra scope buttons may not exist on fresh Kanidm instances
+  for (const scopeBtn of ["oci_admin", "oci_push", "oci_pull"]) {
+    const btn = page.getByRole("button", { name: named(scopeBtn) });
+    if ((await btn.count()) > 0) await btn.click();
+  }
   await page.getByRole("button", { name: named(parentGroupName) }).click();
   await assertApplicationFormValues(page, {
     name: appName,
