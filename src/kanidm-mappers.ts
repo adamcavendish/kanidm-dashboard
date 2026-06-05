@@ -2,7 +2,9 @@ import type {
   Application,
   ApplicationClaimMap,
   ApplicationClaimMapJoin,
+  ApplicationKeyAction,
   ApplicationPatch,
+  ApplicationPolicyToggles,
   ConsoleState,
   CredentialUpdateStatus,
   Group,
@@ -19,6 +21,7 @@ import type {
   TotpRegistration,
   UserAuthTokenStatus,
 } from "./domain";
+import { defaultApplicationPolicyToggles } from "./domain";
 import { initialState } from "./seed";
 import type { AuthResponse, AuthMechanism } from "./kanidm-auth";
 
@@ -174,6 +177,48 @@ export function oauth2PatchEntry(patch: ApplicationPatch): KanidmEntry {
         patch.landingUrl !== undefined ? [patch.landingUrl.trim()] : undefined,
       oauth2_rs_origin: patch.redirectUris?.map((v) => v.trim()),
     }),
+  };
+}
+
+export const oauth2PolicyBooleanAttrs = {
+  preferShortUsername: "oauth2_prefer_short_username",
+  consentPrompt: "oauth2_consent_prompt_enable",
+  jwtLegacyCrypto: "oauth2_jwt_legacy_crypto_enable",
+  strictRedirectUri: "oauth2_strict_redirect_uri",
+  deviceFlow: "oauth2_device_flow_enable",
+  allowInsecureClientDisablePkce: "oauth2_allow_insecure_client_disable_pkce",
+  allowLocalhostRedirect: "oauth2_allow_localhost_redirect",
+} as const satisfies Record<Exclude<keyof ApplicationPolicyToggles, "refreshTokenExpiry">, string>;
+
+export function oauth2PolicyPatchEntry(
+  policy: ApplicationPolicyToggles,
+  options: { includeLocalhostRedirect: boolean },
+): KanidmEntry {
+  return {
+    attrs: compactAttrs({
+      [oauth2PolicyBooleanAttrs.preferShortUsername]: [String(policy.preferShortUsername)],
+      [oauth2PolicyBooleanAttrs.consentPrompt]: [String(policy.consentPrompt)],
+      [oauth2PolicyBooleanAttrs.jwtLegacyCrypto]: [String(policy.jwtLegacyCrypto)],
+      [oauth2PolicyBooleanAttrs.strictRedirectUri]: [String(policy.strictRedirectUri)],
+      [oauth2PolicyBooleanAttrs.deviceFlow]: [String(policy.deviceFlow)],
+      [oauth2PolicyBooleanAttrs.allowInsecureClientDisablePkce]: [
+        String(policy.allowInsecureClientDisablePkce),
+      ],
+      [oauth2PolicyBooleanAttrs.allowLocalhostRedirect]: options.includeLocalhostRedirect
+        ? [String(policy.allowLocalhostRedirect)]
+        : undefined,
+      oauth2_refresh_token_expiry: policy.refreshTokenExpiry.trim()
+        ? [policy.refreshTokenExpiry.trim()]
+        : undefined,
+    }),
+  };
+}
+
+export function oauth2KeyActionEntry(action: ApplicationKeyAction): KanidmEntry {
+  return {
+    attrs: {
+      [action === "rotate" ? "key_action_rotate" : "key_action_revoke"]: ["true"],
+    },
   };
 }
 
@@ -721,6 +766,7 @@ function mapApplication(entry: KanidmEntry, groups: Group[]): Application {
     scopeMaps,
     supplementalScopeMaps,
     claimMaps,
+    policyToggles: mapOAuth2PolicyToggles(entry),
     status: allowedGroups.length ? "ready" : "attention",
   };
 }
@@ -761,6 +807,9 @@ function mapAppLink(link: KanidmAppLink, currentUser: Person | undefined): Appli
       groupId,
       scopes: ["openid", "profile"],
     })),
+    supplementalScopeMaps: [],
+    claimMaps: [],
+    policyToggles: { ...defaultApplicationPolicyToggles },
     status: "ready",
   };
 }
@@ -795,6 +844,27 @@ function values(entry: KanidmEntry, key: string) {
   const attrs = entry.attrs ?? entry;
   const value = (attrs as Record<string, unknown>)[key];
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function attrBoolean(entry: KanidmEntry, key: string) {
+  const value = attr(entry, key).trim().toLowerCase();
+  return value === "true" || value === "1";
+}
+
+function mapOAuth2PolicyToggles(entry: KanidmEntry): ApplicationPolicyToggles {
+  return {
+    preferShortUsername: attrBoolean(entry, oauth2PolicyBooleanAttrs.preferShortUsername),
+    consentPrompt: attrBoolean(entry, oauth2PolicyBooleanAttrs.consentPrompt),
+    jwtLegacyCrypto: attrBoolean(entry, oauth2PolicyBooleanAttrs.jwtLegacyCrypto),
+    strictRedirectUri: attrBoolean(entry, oauth2PolicyBooleanAttrs.strictRedirectUri),
+    deviceFlow: attrBoolean(entry, oauth2PolicyBooleanAttrs.deviceFlow),
+    allowInsecureClientDisablePkce: attrBoolean(
+      entry,
+      oauth2PolicyBooleanAttrs.allowInsecureClientDisablePkce,
+    ),
+    allowLocalhostRedirect: attrBoolean(entry, oauth2PolicyBooleanAttrs.allowLocalhostRedirect),
+    refreshTokenExpiry: attr(entry, "oauth2_refresh_token_expiry").trim(),
+  };
 }
 
 function membershipRefs(entry: KanidmEntry) {

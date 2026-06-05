@@ -409,6 +409,9 @@ describe("KanidmDataSource", () => {
               oauth2_rs_scope_map: ['old_group@localhost: {"openid"}'],
               oauth2_rs_sup_scope_map: ['old_group@localhost: {"legacy"}'],
               oauth2_rs_claim_map: ['roles:old_group@localhost:;:"legacy"'],
+              oauth2_jwt_legacy_crypto_enable: ["true"],
+              oauth2_allow_insecure_client_disable_pkce: ["true"],
+              oauth2_refresh_token_expiry: ["1800"],
             },
           }),
           { status: 200 },
@@ -447,12 +450,45 @@ describe("KanidmDataSource", () => {
             rules: [{ groupId: "idm_group_admins", values: ["read", "write"] }],
           },
         ],
+        policyToggles: {
+          preferShortUsername: true,
+          consentPrompt: true,
+          jwtLegacyCrypto: false,
+          strictRedirectUri: true,
+          deviceFlow: true,
+          allowInsecureClientDisablePkce: false,
+          allowLocalhostRedirect: true,
+          refreshTokenExpiry: "3600",
+        },
       });
+      await ds.updateOAuth2ApplicationKeyAction("grafana", "rotate");
+      await ds.updateOAuth2ApplicationKeyAction("grafana", "revoke");
 
       const findCall = (method: string, path: string) =>
         calls.find((call) => call.method === method && call.url.endsWith(path));
+      const patchWithAttr = (attr: string) =>
+        calls
+          .filter((call) => call.method === "PATCH" && call.url.endsWith("/v1/oauth2/grafana"))
+          .map((call) => JSON.parse(call.body) as { attrs?: Record<string, string[]> })
+          .find((body) => body.attrs?.[attr]);
 
       expect(calls.some((call) => call.url.endsWith("/_basic_secret"))).toBe(true);
+      expect(patchWithAttr("oauth2_prefer_short_username")?.attrs).toMatchObject({
+        oauth2_prefer_short_username: ["true"],
+        oauth2_consent_prompt_enable: ["true"],
+        oauth2_jwt_legacy_crypto_enable: ["false"],
+        oauth2_strict_redirect_uri: ["true"],
+        oauth2_device_flow_enable: ["true"],
+        oauth2_allow_insecure_client_disable_pkce: ["false"],
+        oauth2_allow_localhost_redirect: ["true"],
+        oauth2_refresh_token_expiry: ["3600"],
+      });
+      expect(patchWithAttr("key_action_rotate")?.attrs).toEqual({
+        key_action_rotate: ["true"],
+      });
+      expect(patchWithAttr("key_action_revoke")?.attrs).toEqual({
+        key_action_revoke: ["true"],
+      });
       expect(
         calls.some((call) => call.method === "DELETE" && call.url.includes("_scopemap/old_group")),
       ).toBe(true);
@@ -490,6 +526,62 @@ describe("KanidmDataSource", () => {
       expect(
         findCall("POST", "/v1/oauth2/grafana/_claimmap/permissions/idm_group_admins")?.body,
       ).toBe(JSON.stringify(["read", "write"]));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("omits localhost redirect policy for confidential OAuth2 clients", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      calls.push({
+        url: requestUrl,
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+      if (requestUrl.endsWith("/v1/oauth2/grafana") && (init?.method ?? "GET") === "GET") {
+        return new Response(
+          JSON.stringify({
+            attrs: {
+              oauth2_rs_basic_secret: ["present"],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+      await ds.updateOAuth2ApplicationPolicy("grafana", {
+        scopeMaps: [],
+        supplementalScopeMaps: [],
+        claimMaps: [],
+        policyToggles: {
+          preferShortUsername: true,
+          consentPrompt: false,
+          jwtLegacyCrypto: false,
+          strictRedirectUri: false,
+          deviceFlow: false,
+          allowInsecureClientDisablePkce: false,
+          allowLocalhostRedirect: true,
+          refreshTokenExpiry: "",
+        },
+      });
+
+      const patch = calls.find(
+        (call) => call.method === "PATCH" && call.url.endsWith("/v1/oauth2/grafana"),
+      );
+      expect(JSON.parse(patch?.body ?? "{}").attrs).toEqual({
+        oauth2_prefer_short_username: ["true"],
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

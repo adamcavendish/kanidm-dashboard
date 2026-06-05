@@ -1,10 +1,13 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
-import { Check, CircleAlert, Plus, Trash2, Upload } from "lucide-solid";
+import { createEffect, createSignal, For, Show, untrack } from "solid-js";
+import { Check, CircleAlert, KeyRound, Plus, RotateCw, Trash2, Upload } from "lucide-solid";
+import { defaultApplicationPolicyToggles } from "../../domain";
 import type {
   Application,
+  ApplicationKeyAction,
   ApplicationClaimMapJoin,
   ApplicationPatch,
   ApplicationPolicyInput,
+  ApplicationPolicyToggles,
   ApplicationScopeMap,
 } from "../../domain";
 import { useConsole } from "../../store";
@@ -22,6 +25,63 @@ import { toggleValue } from "../../utils/collections";
 import { validateKanidmImageFile } from "../../utils/image-validation";
 import { labelForGroup } from "../../utils/labels";
 import { searchable } from "../../utils/search";
+
+type ApplicationPolicyToggleKey = Exclude<keyof ApplicationPolicyToggles, "refreshTokenExpiry">;
+
+const oauthPolicyToggleOptions: Array<{
+  key: ApplicationPolicyToggleKey;
+  label: string;
+  attr: string;
+  publicOnly?: boolean;
+}> = [
+  {
+    key: "preferShortUsername",
+    label: "Prefer short username",
+    attr: "oauth2_prefer_short_username",
+  },
+  {
+    key: "consentPrompt",
+    label: "Consent prompt",
+    attr: "oauth2_consent_prompt_enable",
+  },
+  {
+    key: "jwtLegacyCrypto",
+    label: "JWT legacy crypto",
+    attr: "oauth2_jwt_legacy_crypto_enable",
+  },
+  {
+    key: "strictRedirectUri",
+    label: "Strict redirect URI",
+    attr: "oauth2_strict_redirect_uri",
+  },
+  {
+    key: "deviceFlow",
+    label: "Device flow",
+    attr: "oauth2_device_flow_enable",
+  },
+  {
+    key: "allowInsecureClientDisablePkce",
+    label: "Allow disabling PKCE",
+    attr: "oauth2_allow_insecure_client_disable_pkce",
+  },
+  {
+    key: "allowLocalhostRedirect",
+    label: "Localhost redirect",
+    attr: "oauth2_allow_localhost_redirect",
+    publicOnly: true,
+  },
+];
+
+type KeyActionState = {
+  appId: string;
+  action: ApplicationKeyAction;
+};
+
+type KeyActionNotice = {
+  appId: string;
+  text: string;
+};
+
 export function ApplicationsPage() {
   const {
     state,
@@ -29,6 +89,7 @@ export function ApplicationsPage() {
     resetAppImage,
     updateApplication,
     updateApplicationPolicy,
+    updateApplicationKeyAction,
     getApplicationClientSecret,
     deleteApplication,
   } = useConsole();
@@ -44,6 +105,9 @@ export function ApplicationsPage() {
     ApplicationScopeMap[]
   >([]);
   const [editClaimMaps, setEditClaimMaps] = createSignal<ApplicationPolicyInput["claimMaps"]>([]);
+  const [editPolicyToggles, setEditPolicyToggles] = createSignal<ApplicationPolicyToggles>({
+    ...defaultApplicationPolicyToggles,
+  });
   const [editing, setEditing] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
@@ -59,6 +123,10 @@ export function ApplicationsPage() {
   const [clientSecret, setClientSecret] = createSignal("");
   const [secretBusy, setSecretBusy] = createSignal(false);
   const [secretError, setSecretError] = createSignal("");
+  const [keyActionBusy, setKeyActionBusy] = createSignal<KeyActionState | null>(null);
+  const [keyActionError, setKeyActionError] = createSignal<KeyActionNotice | null>(null);
+  const [keyActionMessage, setKeyActionMessage] = createSignal<KeyActionNotice | null>(null);
+  const [confirmKeyRevoke, setConfirmKeyRevoke] = createSignal(false);
 
   const apps = () => state().apps.filter((app) => searchable(app).includes(query().toLowerCase()));
   const selectedApp = () =>
@@ -76,6 +144,17 @@ export function ApplicationsPage() {
   const supplementalScopesForEditingGroup = (groupId: string) =>
     editSupplementalScopeMaps().find((sm) => sm.groupId === groupId)?.scopes ?? [];
 
+  const keyActionBusyForSelectedApp = (action: ApplicationKeyAction) =>
+    keyActionBusy()?.appId === selectedApp()?.id && keyActionBusy()?.action === action;
+
+  const selectedKeyActionError = () =>
+    keyActionError()?.appId === selectedApp()?.id ? (keyActionError()?.text ?? "") : "";
+
+  const selectedKeyActionMessage = () =>
+    keyActionMessage()?.appId === selectedApp()?.id ? (keyActionMessage()?.text ?? "") : "";
+
+  const operationLocked = () => busy() || Boolean(keyActionBusy());
+
   const policyChanged = (app: Application, policy: ApplicationPolicyInput) =>
     JSON.stringify(policy) !==
     JSON.stringify(
@@ -83,6 +162,8 @@ export function ApplicationsPage() {
         app.scopeMaps ?? [],
         app.supplementalScopeMaps ?? [],
         app.claimMaps ?? [],
+        app.policyToggles ?? defaultApplicationPolicyToggles,
+        app.clientType,
       ),
     );
 
@@ -100,24 +181,32 @@ export function ApplicationsPage() {
     return extra;
   };
 
+  function syncEditorFromApp(app: Application, options: { closeEditor: boolean }) {
+    setEditDisplayName(app.displayName);
+    setEditLandingUrl(app.landingUrl);
+    setEditRedirectText(app.redirectUris.join("\n"));
+    setEditAllowedGroups([...app.allowedGroups]);
+    setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
+    setEditSupplementalScopeMaps(structuredClone(app.supplementalScopeMaps ?? []));
+    setEditClaimMaps(structuredClone(app.claimMaps ?? []));
+    setEditPolicyToggles(policyTogglesForApp(app));
+    if (options.closeEditor) setEditing(false);
+    setDeleting(false);
+    setError("");
+    setImageError("");
+    setSecretError("");
+    setKeyActionError(null);
+    setKeyActionMessage(null);
+    setConfirmKeyRevoke(false);
+    setClientSecret("");
+    setClaimGroupId(app.allowedGroups[0] ?? "");
+  }
+
   createEffect(() => {
     const app = selectedApp();
-    if (app) {
-      setEditDisplayName(app.displayName);
-      setEditLandingUrl(app.landingUrl);
-      setEditRedirectText(app.redirectUris.join("\n"));
-      setEditAllowedGroups([...app.allowedGroups]);
-      setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
-      setEditSupplementalScopeMaps(structuredClone(app.supplementalScopeMaps ?? []));
-      setEditClaimMaps(structuredClone(app.claimMaps ?? []));
-      setEditing(false);
-      setDeleting(false);
-      setError("");
-      setImageError("");
-      setSecretError("");
-      setClientSecret("");
-      setClaimGroupId(app.allowedGroups[0] ?? "");
-    }
+    if (!app) return;
+    if (untrack(editing) && (untrack(busy) || untrack(keyActionBusy))) return;
+    syncEditorFromApp(app, { closeEditor: true });
   });
 
   async function handleAppImageUpload(app: Application, event: Event) {
@@ -256,6 +345,14 @@ export function ApplicationsPage() {
     );
   }
 
+  function setPolicyToggle(key: ApplicationPolicyToggleKey, value: boolean) {
+    setEditPolicyToggles((current) => ({ ...current, [key]: value }));
+  }
+
+  function setRefreshTokenExpiry(value: string) {
+    setEditPolicyToggles((current) => ({ ...current, refreshTokenExpiry: value }));
+  }
+
   async function revealClientSecret(app: Application) {
     setSecretBusy(true);
     setSecretError("");
@@ -267,6 +364,28 @@ export function ApplicationsPage() {
       setSecretError(err instanceof Error ? err.message : "Could not reveal client secret.");
     } finally {
       setSecretBusy(false);
+    }
+  }
+
+  async function runKeyAction(app: Application, action: ApplicationKeyAction) {
+    if (editing()) return;
+    setKeyActionBusy({ appId: app.id, action });
+    setKeyActionError(null);
+    setKeyActionMessage(null);
+    try {
+      await updateApplicationKeyAction(app.id, action);
+      setConfirmKeyRevoke(false);
+      setKeyActionMessage({
+        appId: app.id,
+        text: action === "rotate" ? "OAuth keys rotated." : "OAuth keys revoked.",
+      });
+    } catch (err) {
+      setKeyActionError({
+        appId: app.id,
+        text: err instanceof Error ? err.message : "Could not update OAuth keys.",
+      });
+    } finally {
+      setKeyActionBusy(null);
     }
   }
 
@@ -307,6 +426,7 @@ export function ApplicationsPage() {
               <button
                 class={app.id === selectedApp()?.id ? "resource-row active" : "resource-row"}
                 type="button"
+                disabled={operationLocked()}
                 onClick={() => setSelectedAppId(app.id)}
               >
                 <AppIcon app={app} />
@@ -422,6 +542,22 @@ export function ApplicationsPage() {
                       </For>
                     </div>
                   </Show>
+                  <div class="scope-map-summary">
+                    <h4>OAuth policy</h4>
+                    <div class="chip-row">
+                      <For
+                        each={enabledPolicyLabels(selectedApp())}
+                        fallback={<span class="chip">Default policy</span>}
+                      >
+                        {(label) => <span class="chip">{label}</span>}
+                      </For>
+                      <Show when={selectedApp()?.policyToggles?.refreshTokenExpiry}>
+                        <span class="chip">
+                          Refresh expiry: {selectedApp()?.policyToggles?.refreshTokenExpiry}
+                        </span>
+                      </Show>
+                    </div>
+                  </div>
                   <div class="detail-actions">
                     <div class="detail-action-row image-action-row">
                       <label class="file-button compact-file">
@@ -429,7 +565,7 @@ export function ApplicationsPage() {
                         <input
                           type="file"
                           accept=".png,.jpg,.jpeg,.gif,.svg,.webp"
-                          disabled={imageBusy()}
+                          disabled={imageBusy() || operationLocked()}
                           onChange={(event) => {
                             const app = selectedApp();
                             if (app) void handleAppImageUpload(app, event);
@@ -439,7 +575,7 @@ export function ApplicationsPage() {
                       <button
                         class="secondary-action"
                         type="button"
-                        disabled={imageBusy()}
+                        disabled={imageBusy() || operationLocked()}
                         onClick={() => {
                           const app = selectedApp();
                           if (app) void handleResetAppImage(app);
@@ -456,6 +592,7 @@ export function ApplicationsPage() {
                       <button
                         class="secondary-action"
                         type="button"
+                        disabled={operationLocked()}
                         onClick={() => setEditing(true)}
                       >
                         Edit
@@ -473,10 +610,57 @@ export function ApplicationsPage() {
                           {secretBusy() ? "Reading…" : "Reveal secret"}
                         </button>
                       </Show>
+                      <button
+                        class="secondary-action"
+                        type="button"
+                        disabled={operationLocked()}
+                        onClick={() => {
+                          const app = selectedApp();
+                          if (app) void runKeyAction(app, "rotate");
+                        }}
+                      >
+                        <RotateCw size={14} />{" "}
+                        {keyActionBusyForSelectedApp("rotate") ? "Rotating…" : "Rotate keys"}
+                      </button>
+                      <Show
+                        when={confirmKeyRevoke()}
+                        fallback={
+                          <button
+                            class="secondary-action"
+                            type="button"
+                            disabled={operationLocked()}
+                            onClick={() => setConfirmKeyRevoke(true)}
+                          >
+                            <KeyRound size={14} /> Revoke keys
+                          </button>
+                        }
+                      >
+                        <span class="muted">Confirm revoke?</span>
+                        <button
+                          class="danger-action"
+                          type="button"
+                          disabled={operationLocked()}
+                          onClick={() => {
+                            const app = selectedApp();
+                            if (app) void runKeyAction(app, "revoke");
+                          }}
+                        >
+                          {keyActionBusyForSelectedApp("revoke") ? "Revoking…" : "Yes, revoke"}
+                        </button>
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          disabled={operationLocked()}
+                          onClick={() => setConfirmKeyRevoke(false)}
+                        >
+                          Cancel
+                        </button>
+                      </Show>
                       <Show when={!deleting()}>
                         <button
                           class="danger-action"
                           type="button"
+                          disabled={operationLocked()}
                           onClick={() => setDeleting(true)}
                         >
                           <Trash2 size={14} /> Delete application
@@ -487,7 +671,7 @@ export function ApplicationsPage() {
                         <button
                           class="danger-action"
                           type="button"
-                          disabled={busy()}
+                          disabled={operationLocked()}
                           onClick={async () => {
                             setBusy(true);
                             setError("");
@@ -510,7 +694,7 @@ export function ApplicationsPage() {
                         <button
                           class="secondary-action"
                           type="button"
-                          disabled={busy()}
+                          disabled={operationLocked()}
                           onClick={() => setDeleting(false)}
                         >
                           Cancel
@@ -523,6 +707,10 @@ export function ApplicationsPage() {
                       </div>
                     </Show>
                     <ErrorBox error={secretError} />
+                    <ErrorBox error={selectedKeyActionError} />
+                    <Show when={selectedKeyActionMessage()}>
+                      <small class="muted">{selectedKeyActionMessage()}</small>
+                    </Show>
                   </div>
                 </>
               }
@@ -766,6 +954,51 @@ export function ApplicationsPage() {
           </Show>
 
           <Show when={editing()}>
+            <GlassPanel title="OAuth policy">
+              <div class="oauth-policy-grid toggle-row">
+                <For each={oauthPolicyToggleOptions}>
+                  {(option) => {
+                    const blocked = () =>
+                      option.publicOnly && selectedApp()?.clientType !== "public";
+                    return (
+                      <label
+                        class={blocked() ? "oauth-policy-toggle disabled" : "oauth-policy-toggle"}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!blocked() && editPolicyToggles()[option.key]}
+                          disabled={blocked()}
+                          onChange={(event) =>
+                            setPolicyToggle(option.key, event.currentTarget.checked)
+                          }
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>
+                            {option.attr}
+                            <Show when={blocked()}> · Public clients only</Show>
+                          </small>
+                        </span>
+                      </label>
+                    );
+                  }}
+                </For>
+              </div>
+              <div class="field-stack compact-fields">
+                <label>
+                  Refresh token expiry
+                  <input
+                    type="text"
+                    value={editPolicyToggles().refreshTokenExpiry}
+                    onInput={(event) => setRefreshTokenExpiry(event.currentTarget.value)}
+                    placeholder="3600"
+                  />
+                </label>
+              </div>
+            </GlassPanel>
+          </Show>
+
+          <Show when={editing()}>
             <div class="edit-toolbar">
               <button
                 class="primary-action"
@@ -796,7 +1029,18 @@ export function ApplicationsPage() {
                       editScopeMaps(),
                       editSupplementalScopeMaps(),
                       editClaimMaps(),
+                      editPolicyToggles(),
+                      app.clientType,
                     );
+                    if (refreshTokenExpiryClearUnsupported(app, nextPolicy.policyToggles)) {
+                      setError(
+                        [
+                          "Kanidm OAuth2 does not expose a clear operation for refresh token",
+                          "expiry. Enter a replacement value instead.",
+                        ].join(" "),
+                      );
+                      return;
+                    }
                     const shouldUpdatePolicy = policyChanged(app, nextPolicy);
 
                     if (Object.keys(patch).length > 0) {
@@ -807,7 +1051,12 @@ export function ApplicationsPage() {
                       await updateApplicationPolicy(app.id, nextPolicy);
                     }
 
-                    setEditing(false);
+                    const savedApp = selectedApp();
+                    if (savedApp) {
+                      syncEditorFromApp(savedApp, { closeEditor: true });
+                    } else {
+                      setEditing(false);
+                    }
                   } catch (err) {
                     setError(err instanceof Error ? err.message : "Could not save application.");
                   } finally {
@@ -822,17 +1071,8 @@ export function ApplicationsPage() {
                 type="button"
                 disabled={busy()}
                 onClick={() => {
-                  setEditing(false);
                   const app = selectedApp();
-                  if (app) {
-                    setEditDisplayName(app.displayName);
-                    setEditLandingUrl(app.landingUrl);
-                    setEditRedirectText(app.redirectUris.join("\n"));
-                    setEditAllowedGroups([...app.allowedGroups]);
-                    setEditScopeMaps(structuredClone(app.scopeMaps ?? []));
-                    setEditSupplementalScopeMaps(structuredClone(app.supplementalScopeMaps ?? []));
-                    setEditClaimMaps(structuredClone(app.claimMaps ?? []));
-                  }
+                  if (app) syncEditorFromApp(app, { closeEditor: true });
                 }}
               >
                 Cancel
@@ -849,6 +1089,8 @@ function normalizePolicyInput(
   scopeMaps: ApplicationScopeMap[],
   supplementalScopeMaps: ApplicationScopeMap[],
   claimMaps: ApplicationPolicyInput["claimMaps"],
+  policyToggles: ApplicationPolicyToggles,
+  clientType: Application["clientType"],
 ): ApplicationPolicyInput {
   return {
     scopeMaps: normalizeScopeMaps(scopeMaps),
@@ -867,6 +1109,7 @@ function normalizePolicyInput(
       }))
       .filter((claimMap) => claimMap.claimName && claimMap.rules.length)
       .sort((left, right) => left.claimName.localeCompare(right.claimName)),
+    policyToggles: normalizePolicyToggles(policyToggles, clientType),
   };
 }
 
@@ -878,4 +1121,37 @@ function normalizeScopeMaps(scopeMaps: ApplicationScopeMap[]) {
     }))
     .filter((scopeMap) => scopeMap.groupId && scopeMap.scopes.length)
     .sort((left, right) => left.groupId.localeCompare(right.groupId));
+}
+
+function policyTogglesForApp(app: Application): ApplicationPolicyToggles {
+  return {
+    ...defaultApplicationPolicyToggles,
+    ...app.policyToggles,
+  };
+}
+
+function normalizePolicyToggles(
+  policyToggles: ApplicationPolicyToggles,
+  clientType: Application["clientType"],
+): ApplicationPolicyToggles {
+  return {
+    ...policyToggles,
+    allowLocalhostRedirect: clientType === "public" ? policyToggles.allowLocalhostRedirect : false,
+    refreshTokenExpiry: policyToggles.refreshTokenExpiry.trim(),
+  };
+}
+
+function refreshTokenExpiryClearUnsupported(
+  app: Application,
+  policyToggles: ApplicationPolicyToggles,
+) {
+  return Boolean(app.policyToggles?.refreshTokenExpiry && !policyToggles.refreshTokenExpiry);
+}
+
+function enabledPolicyLabels(app: Application | undefined) {
+  if (!app) return [];
+  const toggles = normalizePolicyToggles(policyTogglesForApp(app), app.clientType);
+  return oauthPolicyToggleOptions
+    .filter((option) => toggles[option.key])
+    .map((option) => option.label);
 }
