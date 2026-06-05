@@ -2,7 +2,7 @@
 
 This phase expands application administration into a supported OAuth policy
 workbench for scope maps, supplemental scope maps, claim maps, join strategy,
-and confidential-client secret display.
+confidential-client secret display, verified policy toggles, and key actions.
 
 Run all commands from:
 
@@ -16,13 +16,21 @@ Run all commands from:
   claim rules.
 - Confidential-client secret reveal through Kanidm
   `/v1/oauth2/{rs_name}/_basic_secret`.
+- Attribute-backed OAuth policy controls for:
+  `oauth2_prefer_short_username`, `oauth2_consent_prompt_enable`,
+  `oauth2_jwt_legacy_crypto_enable`, `oauth2_strict_redirect_uri`,
+  `oauth2_device_flow_enable`, `oauth2_refresh_token_expiry`,
+  `oauth2_allow_insecure_client_disable_pkce`, and
+  `oauth2_allow_localhost_redirect`.
+- `oauth2_allow_localhost_redirect` is editable only for public clients.
+- Existing `oauth2_refresh_token_expiry` values can be changed, but clearing an
+  existing value is blocked because Kanidm 1.10.3 exposes no OAuth2
+  resource-server attr-delete route.
+- OAuth key rotation and revocation through `key_action_rotate` and
+  `key_action_revoke` PATCH attribute operations.
 - Kanidm-backed policy writes through generated OAuth2 API endpoints:
   `_scopemap`, `_sup_scopemap`, `_claimmap/{claim}`, and
   `_claimmap/{claim}/{group}`.
-- No key rotation or revocation controls; the generated OpenAPI SDK does not
-  expose those operations.
-- No mutating policy toggle controls. Live Kanidm rejected the tested toggle
-  attrs through the supported OAuth2 patch endpoint.
 
 ## Required Fast Gate
 
@@ -53,10 +61,13 @@ record the exact Kanidm response and run targeted browser QA on
 4. Add/remove a supplemental scope for a selected group.
 5. Add a claim map rule with each join strategy: array, CSV, and
    space-separated.
-6. Save changes and confirm the app reload shows the expected summaries.
-7. Confirm unsupported key rotation/revocation controls are absent.
-8. Confirm policy-toggle mutation controls are absent unless future live API
-   verification proves support.
+6. Toggle each verified policy control and set a refresh-token expiry value.
+7. Confirm clearing an existing refresh-token expiry is blocked with guidance
+   to enter a replacement value.
+8. Confirm localhost redirect can be changed only on public clients.
+9. Save changes and confirm the app reload shows the expected summaries.
+10. Rotate OAuth keys and confirm the command completes.
+11. Revoke OAuth keys and confirm the command completes.
 
 ## Unit Coverage Targets
 
@@ -65,6 +76,11 @@ record the exact Kanidm response and run targeted browser QA on
 - Data source reads confidential-client secrets through `_basic_secret`.
 - Data source writes/deletes scope maps, supplemental scope maps, claim maps,
   and claim-map join strategy through generated SDK endpoints.
+- Mapper parses the verified OAuth policy toggle attributes.
+- Data source writes changed OAuth toggle attributes through
+  `/v1/oauth2/{rs_name}` PATCH.
+- Data source sends `key_action_rotate` and `key_action_revoke` command
+  attributes through `/v1/oauth2/{rs_name}` PATCH.
 
 ## Live Validation Notes
 
@@ -86,9 +102,12 @@ Run date: 2026-06-04.
   `roles:idm_admins@localhost:;:"admin,owner"` for array joins,
   `roles:idm_admins@localhost:,:"admin,owner"` for CSV joins, and
   `roles:idm_admins@localhost: :"admin,owner"` for space-separated joins.
-- Live API probes confirmed the tested toggle attrs were rejected by
-  `/v1/oauth2/{rs_name}` PATCH with `400 invalidattributename`; mutating
-  toggle controls remain intentionally out of scope for this phase.
+- Follow-up live API probes on 2026-06-05 confirmed seven of eight toggle
+  attributes were accepted against Kanidm 1.10.3 through
+  `/v1/oauth2/{rs_name}` PATCH. `oauth2_allow_localhost_redirect` was accepted
+  for public clients through a public test client.
+- Follow-up live API probes confirmed `key_action_rotate` and
+  `key_action_revoke` use the same OAuth2 PATCH attribute mechanism.
 - Browser QA on `/admin/apps` confirmed the temporary confidential client
   rendered normal scope maps, supplemental scope maps, claim maps, and the
   client-secret reveal path.
@@ -102,12 +121,26 @@ Run date: 2026-06-04.
   `qa_review` was persisted in `oauth2_rs_sup_scope_map`.
 - The temporary resource server was deleted after the probe.
 
+Follow-up run date: 2026-06-05.
+
+- `vp check`, `vp test`, and `vp build` passed after adding attr-backed OAuth
+  policy controls and key action commands.
+- `vp run e2e-kanidm` was attempted with
+  `KANIDM_DASHBOARD_URL=http://127.0.0.1:5173` and
+  `KANIDM_TARGET=https://localhost:8443` after starting
+  `vp dev --host 127.0.0.1` against the live tunnel.
+- The live E2E was blocked at login by the local `.env.local` admin password:
+  Kanidm returned `incorrect password`, the script did not obtain an admin
+  token, and no live mutations were made.
+- Browser QA for `/admin/apps` was also blocked because the in-app browser
+  redirected to `/login` without a valid admin session.
+
 ## Acceptance Evidence
 
 - `vp check` passes.
 - `vp test` passes.
 - `vp build` passes.
-- Live Kanidm E2E is passed or the group display-name blocker is documented
+- Live Kanidm E2E is passed or the current environment blocker is documented
   with reproduction details.
 - Subagent review findings are resolved or explicitly documented before asking
   the user to push.

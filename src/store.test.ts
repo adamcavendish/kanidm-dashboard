@@ -125,6 +125,14 @@ describe("relationship helpers", () => {
               'teams:registry_parent@localhost:,:"dev,ops"',
               'permissions:registry_child@localhost: :"read,write"',
             ],
+            oauth2_prefer_short_username: ["true"],
+            oauth2_consent_prompt_enable: ["true"],
+            oauth2_jwt_legacy_crypto_enable: ["false"],
+            oauth2_strict_redirect_uri: ["true"],
+            oauth2_device_flow_enable: ["true"],
+            oauth2_allow_insecure_client_disable_pkce: ["true"],
+            oauth2_allow_localhost_redirect: ["true"],
+            oauth2_refresh_token_expiry: ["3600"],
           },
         },
       ],
@@ -156,6 +164,16 @@ describe("relationship helpers", () => {
         rules: [{ groupId: "group-child", values: ["read", "write"] }],
       },
     ]);
+    expect(state.apps[0]?.policyToggles).toEqual({
+      preferShortUsername: true,
+      consentPrompt: true,
+      jwtLegacyCrypto: false,
+      strictRedirectUri: true,
+      deviceFlow: true,
+      allowInsecureClientDisablePkce: true,
+      allowLocalhostRedirect: true,
+      refreshTokenExpiry: "3600",
+    });
   });
 
   it("maps direct memberships without treating every available group as selected", () => {

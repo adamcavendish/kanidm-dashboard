@@ -11,6 +11,7 @@ import {
 import type {
   AccessPath,
   Application,
+  ApplicationKeyAction,
   ApplicationPatch,
   ApplicationPolicyInput,
   BrandingSettings,
@@ -51,7 +52,7 @@ import type {
   UnixAccountSettings,
   UserAuthTokenStatus,
 } from "./domain";
-import { defaultDashboardConfig } from "./domain";
+import { defaultApplicationPolicyToggles, defaultDashboardConfig } from "./domain";
 import { KanidmDataSource, MockDataSource } from "./data-source";
 import { isKanidmAuthFailure } from "./kanidm-error";
 import { Configuration } from "./generated/kanidm-sdk/runtime/runtime";
@@ -254,6 +255,7 @@ interface ConsoleContextValue {
   addApplication: (input: NewApplicationInput) => Promise<CreatedApplication>;
   updateApplication: (appId: string, patch: ApplicationPatch) => Promise<void>;
   updateApplicationPolicy: (appId: string, input: ApplicationPolicyInput) => Promise<void>;
+  updateApplicationKeyAction: (appId: string, action: ApplicationKeyAction) => Promise<void>;
   getApplicationClientSecret: (appId: string) => Promise<string | null>;
   deleteApplication: (appId: string) => Promise<void>;
   toggleGroupMember: (groupId: string, personId: string) => Promise<void>;
@@ -2474,6 +2476,9 @@ export function ConsoleProvider(props: ParentProps) {
       allowedGroups: input.allowedGroups,
       scopes: input.scopes,
       scopeMaps: normalizedApplicationScopeMaps(input),
+      supplementalScopeMaps: [],
+      claimMaps: [],
+      policyToggles: { ...defaultApplicationPolicyToggles },
       status: "draft",
     };
 
@@ -2539,6 +2544,7 @@ export function ConsoleProvider(props: ParentProps) {
             groupId: groupNames.get(rule.groupId) ?? rule.groupId,
           })),
         })),
+        policyToggles: input.policyToggles,
       };
       await mutateKanidm("Updating Kanidm OAuth2 policy.", () =>
         new KanidmDataSource(
@@ -2568,10 +2574,28 @@ export function ConsoleProvider(props: ParentProps) {
           scopeMaps,
           supplementalScopeMaps,
           claimMaps: input.claimMaps,
+          policyToggles: input.policyToggles,
           status: scopeMaps.length ? "ready" : "attention",
         };
       }),
     }));
+  };
+
+  const updateApplicationKeyAction = async (appId: string, action: ApplicationKeyAction) => {
+    const app = state().apps.find((candidate) => candidate.id === appId);
+    if (!app) throw new Error("Application not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      await mutateKanidm("Updating Kanidm OAuth2 key state.", () =>
+        new KanidmDataSource(
+          config().dataSource,
+          sessionStorage.getItem(bearerTokenKey) ?? undefined,
+        ).updateOAuth2ApplicationKeyAction(app.name, action),
+      );
+      return;
+    }
+
+    return;
   };
 
   const getApplicationClientSecret = async (appId: string) => {
@@ -2944,6 +2968,7 @@ export function ConsoleProvider(props: ParentProps) {
     addApplication,
     updateApplication,
     updateApplicationPolicy,
+    updateApplicationKeyAction,
     getApplicationClientSecret,
     deleteApplication,
     toggleGroupMember,

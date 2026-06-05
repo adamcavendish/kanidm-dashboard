@@ -1,5 +1,6 @@
 import type {
   Application,
+  ApplicationKeyAction,
   ApplicationPatch,
   ApplicationPolicyInput,
   ConsoleState,
@@ -32,8 +33,14 @@ import type {
   CredentialUpdateIntent,
   CredentialUpdateStatus,
 } from "./domain";
-import { writableSystemConfigAttrs } from "./domain";
-import { mapKanidmState, oauth2PatchEntry } from "./kanidm-mappers";
+import { defaultApplicationPolicyToggles, writableSystemConfigAttrs } from "./domain";
+import {
+  mapKanidmState,
+  oauth2KeyActionEntry,
+  oauth2PatchEntry,
+  oauth2PolicyBooleanAttrs,
+  oauth2PolicyPatchEntry,
+} from "./kanidm-mappers";
 import { Configuration } from "./generated/kanidm-sdk/runtime/runtime";
 import { SelfApi } from "./generated/kanidm-sdk/apis/SelfApi";
 import { PersonApi } from "./generated/kanidm-sdk/apis/PersonApi";
@@ -117,6 +124,7 @@ export interface DashboardDataSource {
   deleteOAuth2ApplicationScopeMap(appName: string, groupName: string): Promise<void>;
   getOAuth2ApplicationClientSecret(appName: string): Promise<string | null>;
   updateOAuth2ApplicationPolicy(appName: string, input: ApplicationPolicyInput): Promise<void>;
+  updateOAuth2ApplicationKeyAction(appName: string, action: ApplicationKeyAction): Promise<void>;
   uploadOAuth2ApplicationImage(appName: string, file: File): Promise<void>;
   deleteOAuth2ApplicationImage(appName: string): Promise<void>;
   radiusPassword(id: string): Promise<string | null>;
@@ -681,6 +689,16 @@ export class KanidmDataSource implements DashboardDataSource {
     const api = new Oauth2Api(this.config);
     const entry = await api.oauth2IdGet({ rsName: appName });
     const attrs = entry?.attrs ?? {};
+    const policyEntry = oauth2PolicyPatchEntry(input.policyToggles, {
+      includeLocalhostRedirect: !attrs.oauth2_rs_basic_secret?.length,
+    });
+    const changedPolicyAttrs = oauth2PolicyChangedAttrs(policyEntry.attrs ?? {}, attrs);
+    if (Object.keys(changedPolicyAttrs).length) {
+      await api.oauth2IdPatch({
+        rsName: appName,
+        body: { attrs: changedPolicyAttrs } as unknown as Entry,
+      });
+    }
 
     await syncOAuth2ScopeMaps(
       mapGroupsFromAttrs(attrs.oauth2_rs_scope_map ?? []),
@@ -738,6 +756,16 @@ export class KanidmDataSource implements DashboardDataSource {
         });
       }
     }
+  }
+
+  async updateOAuth2ApplicationKeyAction(
+    appName: string,
+    action: ApplicationKeyAction,
+  ): Promise<void> {
+    await new Oauth2Api(this.config).oauth2IdPatch({
+      rsName: appName,
+      body: oauth2KeyActionEntry(action) as unknown as Entry,
+    });
   }
 
   private async uploadImage(path: string, file: File): Promise<void> {
@@ -1257,6 +1285,32 @@ function claimRuleKey(claimName: string, group: string) {
 
 function normalizeKanidmRef(value: string) {
   return value.trim().replace(/@[^:@\s]+$/, "");
+}
+
+const oauth2BooleanPolicyAttrNames = new Set<string>(Object.values(oauth2PolicyBooleanAttrs));
+
+function oauth2PolicyChangedAttrs(
+  nextAttrs: Record<string, readonly string[]>,
+  existingAttrs: Record<string, readonly string[]>,
+) {
+  return Object.fromEntries(
+    Object.entries(nextAttrs).filter(([attr, nextValues]) => {
+      const existingValues = existingAttrs[attr] ?? [];
+      if (oauth2BooleanPolicyAttrNames.has(attr)) {
+        return oauth2AttrBoolean(nextValues) !== oauth2AttrBoolean(existingValues);
+      }
+      return !stringArraysEqual(nextValues, existingValues);
+    }),
+  );
+}
+
+function oauth2AttrBoolean(values: readonly string[]) {
+  const value = values[0]?.trim().toLowerCase() ?? "";
+  return value === "true" || value === "1";
+}
+
+function stringArraysEqual(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function normalizedPolicyScopeMaps(scopeMaps: Array<{ groupId: string; scopes: string[] }>) {
@@ -1784,6 +1838,9 @@ export class MockDataSource implements DashboardDataSource {
       allowedGroups: input.allowedGroups,
       scopes: input.scopes,
       scopeMaps: input.scopeMaps ?? [],
+      supplementalScopeMaps: [],
+      claimMaps: [],
+      policyToggles: { ...defaultApplicationPolicyToggles },
       status: "draft",
     } as Application;
     this.state = { ...this.state, apps: [...this.state.apps, app] };
@@ -1894,6 +1951,7 @@ export class MockDataSource implements DashboardDataSource {
           scopeMaps,
           supplementalScopeMaps,
           claimMaps: input.claimMaps,
+          policyToggles: input.policyToggles,
           allowedGroups: [...new Set(scopeMaps.map((scopeMap) => scopeMap.groupId))],
           scopes: scopes.length ? scopes : ["openid", "profile"],
           status: scopeMaps.length ? "ready" : "attention",
@@ -1902,6 +1960,10 @@ export class MockDataSource implements DashboardDataSource {
     };
     this.persist();
   }
+  async updateOAuth2ApplicationKeyAction(
+    _appName: string,
+    _action: ApplicationKeyAction,
+  ): Promise<void> {}
   async generateRadiusPassword(id: string): Promise<string | null> {
     const pw = `rad-demo-${Math.random().toString(36).slice(2, 10)}`;
     this.radiusPasswords[id] = pw;

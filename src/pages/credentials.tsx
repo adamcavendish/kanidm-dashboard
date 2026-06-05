@@ -421,167 +421,26 @@ export function CredentialsPage() {
           href="/radius"
         />
       </div>
-      <GlassPanel title="Credential update">
-        <Show
-          when={credentialStatus()}
-          fallback={
-            <div class="field-grid">
-              <p class="muted">
-                Start a short-lived credential update session to add or remove passkeys and
-                regenerate backup codes. Staged changes are not applied until you commit.
-              </p>
-              <div class="button-row">
-                <button
-                  class="primary-action"
-                  type="button"
-                  disabled={credentialControlsLocked()}
-                  onClick={() => void startSelfServiceUpdate()}
-                >
-                  <ClipboardCheck size={16} />
-                  {credentialBusy() === "start" ? "Starting update" : "Start credential update"}
-                </button>
-                <button
-                  class="secondary-action"
-                  type="button"
-                  disabled={credentialControlsLocked()}
-                  onClick={() => void generateBackupCodes()}
-                >
-                  <SquareAsterisk size={16} />
-                  {credentialBusy() === "backup-codes" ? "Generating codes" : "Regenerate codes"}
-                </button>
-              </div>
-            </div>
-          }
-        >
-          {(verified) => (
-            <>
-              <CredentialUpdateStatusPanel status={verified()} />
+      <div class="credential-panel-stack">
+        <GlassPanel title="Credential update">
+          <Show
+            when={credentialStatus()}
+            fallback={
               <div class="field-grid">
-                <Show when={verified().passkeys.length}>
-                  <label>
-                    Registered passkey
-                    <select
-                      aria-label="Registered passkey"
-                      disabled={credentialControlsLocked()}
-                      value={passkeyRemoveId()}
-                      onChange={(event) => setPasskeyRemoveId(event.currentTarget.value)}
-                    >
-                      <option value="">Select passkey</option>
-                      <For each={verified().passkeys}>
-                        {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
-                      </For>
-                    </select>
-                  </label>
-                </Show>
-                <Show when={verified().attestedPasskeys.length}>
-                  <label>
-                    Registered attested passkey
-                    <select
-                      aria-label="Registered attested passkey"
-                      disabled={credentialControlsLocked()}
-                      value={attestedPasskeyRemoveId()}
-                      onChange={(event) => setAttestedPasskeyRemoveId(event.currentTarget.value)}
-                    >
-                      <option value="">Select attested passkey</option>
-                      <For each={verified().attestedPasskeys}>
-                        {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
-                      </For>
-                    </select>
-                  </label>
-                </Show>
-                <label>
-                  Passkey label
-                  <input
+                <p class="muted">
+                  Start a short-lived credential update session to add or remove passkeys and
+                  regenerate backup codes. Staged changes are not applied until you commit.
+                </p>
+                <div class="button-row">
+                  <button
+                    class="primary-action"
+                    type="button"
                     disabled={credentialControlsLocked()}
-                    value={passkeyLabel()}
-                    onInput={(event) => setPasskeyLabel(event.currentTarget.value)}
-                  />
-                </label>
-                <div class="review-box">
-                  <Fingerprint size={18} />
-                  <span>{passkeyRegistrationHint(verified().pendingPasskey)}</span>
-                </div>
-                <div class="button-row">
-                  <button
-                    class="secondary-action"
-                    type="button"
-                    disabled={
-                      credentialControlsLocked() ||
-                      credentialBusy() === "passkey-start" ||
-                      Boolean(verified().pendingPasskey)
-                    }
-                    onClick={() => void startPasskey("passkey")}
+                    onClick={() => void startSelfServiceUpdate()}
                   >
-                    <Fingerprint size={16} />
-                    {credentialBusy() === "passkey-start" ? "Starting passkey" : "Start passkey"}
+                    <ClipboardCheck size={16} />
+                    {credentialBusy() === "start" ? "Starting update" : "Start credential update"}
                   </button>
-                  <button
-                    class="secondary-action"
-                    type="button"
-                    disabled={
-                      credentialControlsLocked() ||
-                      credentialBusy() === "attested-passkey-start" ||
-                      Boolean(verified().pendingPasskey)
-                    }
-                    onClick={() => void startPasskey("attested-passkey")}
-                  >
-                    <Fingerprint size={16} />
-                    {credentialBusy() === "attested-passkey-start"
-                      ? "Starting attested passkey"
-                      : "Start attested passkey"}
-                  </button>
-                  <button
-                    class="secondary-action"
-                    type="button"
-                    disabled={
-                      credentialControlsLocked() ||
-                      credentialBusy() === "passkey-finish" ||
-                      !verified().pendingPasskey ||
-                      !passkeyLabel().trim()
-                    }
-                    onClick={() => void finishPasskeyRegistration()}
-                  >
-                    <ShieldCheck size={16} />
-                    {credentialBusy() === "passkey-finish"
-                      ? "Registering passkey"
-                      : verified().pendingPasskey?.kind === "attested-passkey"
-                        ? "Register attested passkey"
-                        : "Register passkey"}
-                  </button>
-                  <button
-                    class="danger-action"
-                    type="button"
-                    disabled={
-                      credentialControlsLocked() ||
-                      credentialBusy() === "passkey-remove" ||
-                      !verified().passkeys.length ||
-                      !passkeyRemoveId().trim()
-                    }
-                    onClick={() => void removePasskey()}
-                  >
-                    <Trash2 size={16} />
-                    {credentialBusy() === "passkey-remove" ? "Removing passkey" : "Remove passkey"}
-                  </button>
-                  <button
-                    class="danger-action"
-                    type="button"
-                    disabled={
-                      credentialControlsLocked() ||
-                      credentialBusy() === "attested-passkey-remove" ||
-                      !verified().attestedPasskeys.length ||
-                      !attestedPasskeyRemoveId().trim()
-                    }
-                    onClick={() => void removeAttestedPasskey()}
-                  >
-                    <Trash2 size={16} />
-                    {credentialBusy() === "attested-passkey-remove"
-                      ? "Removing attested passkey"
-                      : "Remove attested passkey"}
-                  </button>
-                </div>
-              </div>
-              <div class="field-grid">
-                <div class="button-row">
                   <button
                     class="secondary-action"
                     type="button"
@@ -589,107 +448,254 @@ export function CredentialsPage() {
                     onClick={() => void generateBackupCodes()}
                   >
                     <SquareAsterisk size={16} />
-                    {credentialBusy() === "backup-codes"
-                      ? "Generating codes"
-                      : "Regenerate backup codes"}
+                    {credentialBusy() === "backup-codes" ? "Generating codes" : "Regenerate codes"}
+                  </button>
+                </div>
+              </div>
+            }
+          >
+            {(verified) => (
+              <>
+                <CredentialUpdateStatusPanel status={verified()} />
+                <div class="field-grid">
+                  <Show when={verified().passkeys.length}>
+                    <label>
+                      Registered passkey
+                      <select
+                        aria-label="Registered passkey"
+                        disabled={credentialControlsLocked()}
+                        value={passkeyRemoveId()}
+                        onChange={(event) => setPasskeyRemoveId(event.currentTarget.value)}
+                      >
+                        <option value="">Select passkey</option>
+                        <For each={verified().passkeys}>
+                          {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
+                        </For>
+                      </select>
+                    </label>
+                  </Show>
+                  <Show when={verified().attestedPasskeys.length}>
+                    <label>
+                      Registered attested passkey
+                      <select
+                        aria-label="Registered attested passkey"
+                        disabled={credentialControlsLocked()}
+                        value={attestedPasskeyRemoveId()}
+                        onChange={(event) => setAttestedPasskeyRemoveId(event.currentTarget.value)}
+                      >
+                        <option value="">Select attested passkey</option>
+                        <For each={verified().attestedPasskeys}>
+                          {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
+                        </For>
+                      </select>
+                    </label>
+                  </Show>
+                  <label>
+                    Passkey label
+                    <input
+                      disabled={credentialControlsLocked()}
+                      value={passkeyLabel()}
+                      onInput={(event) => setPasskeyLabel(event.currentTarget.value)}
+                    />
+                  </label>
+                  <div class="review-box">
+                    <Fingerprint size={18} />
+                    <span>{passkeyRegistrationHint(verified().pendingPasskey)}</span>
+                  </div>
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        credentialControlsLocked() ||
+                        credentialBusy() === "passkey-start" ||
+                        Boolean(verified().pendingPasskey)
+                      }
+                      onClick={() => void startPasskey("passkey")}
+                    >
+                      <Fingerprint size={16} />
+                      {credentialBusy() === "passkey-start" ? "Starting passkey" : "Start passkey"}
+                    </button>
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        credentialControlsLocked() ||
+                        credentialBusy() === "attested-passkey-start" ||
+                        Boolean(verified().pendingPasskey)
+                      }
+                      onClick={() => void startPasskey("attested-passkey")}
+                    >
+                      <Fingerprint size={16} />
+                      {credentialBusy() === "attested-passkey-start"
+                        ? "Starting attested passkey"
+                        : "Start attested passkey"}
+                    </button>
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        credentialControlsLocked() ||
+                        credentialBusy() === "passkey-finish" ||
+                        !verified().pendingPasskey ||
+                        !passkeyLabel().trim()
+                      }
+                      onClick={() => void finishPasskeyRegistration()}
+                    >
+                      <ShieldCheck size={16} />
+                      {credentialBusy() === "passkey-finish"
+                        ? "Registering passkey"
+                        : verified().pendingPasskey?.kind === "attested-passkey"
+                          ? "Register attested passkey"
+                          : "Register passkey"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={
+                        credentialControlsLocked() ||
+                        credentialBusy() === "passkey-remove" ||
+                        !verified().passkeys.length ||
+                        !passkeyRemoveId().trim()
+                      }
+                      onClick={() => void removePasskey()}
+                    >
+                      <Trash2 size={16} />
+                      {credentialBusy() === "passkey-remove"
+                        ? "Removing passkey"
+                        : "Remove passkey"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={
+                        credentialControlsLocked() ||
+                        credentialBusy() === "attested-passkey-remove" ||
+                        !verified().attestedPasskeys.length ||
+                        !attestedPasskeyRemoveId().trim()
+                      }
+                      onClick={() => void removeAttestedPasskey()}
+                    >
+                      <Trash2 size={16} />
+                      {credentialBusy() === "attested-passkey-remove"
+                        ? "Removing attested passkey"
+                        : "Remove attested passkey"}
+                    </button>
+                  </div>
+                </div>
+                <div class="field-grid">
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={credentialControlsLocked()}
+                      onClick={() => void generateBackupCodes()}
+                    >
+                      <SquareAsterisk size={16} />
+                      {credentialBusy() === "backup-codes"
+                        ? "Generating codes"
+                        : "Regenerate backup codes"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={credentialControlsLocked()}
+                      onClick={() => void removeBackupCodes()}
+                    >
+                      <Trash2 size={16} />
+                      {credentialBusy() === "backup-code-remove"
+                        ? "Removing codes"
+                        : "Remove backup codes"}
+                    </button>
+                  </div>
+                  <Show when={verified().pendingBackupCodes.length}>
+                    <div class="code-grid" aria-label="Generated backup codes">
+                      <For each={verified().pendingBackupCodes}>
+                        {(code) => <code>{code}</code>}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+                <div class="button-row">
+                  <button
+                    class="primary-action"
+                    type="button"
+                    disabled={!verified().canCommit || credentialControlsLocked()}
+                    onClick={() => void commitSelfServiceUpdate()}
+                  >
+                    <ClipboardCheck size={16} />
+                    {credentialBusy() === "commit" ? "Committing" : "Commit credential update"}
                   </button>
                   <button
                     class="danger-action"
                     type="button"
                     disabled={credentialControlsLocked()}
-                    onClick={() => void removeBackupCodes()}
+                    onClick={() => void cancelSelfServiceUpdate()}
                   >
-                    <Trash2 size={16} />
-                    {credentialBusy() === "backup-code-remove"
-                      ? "Removing codes"
-                      : "Remove backup codes"}
+                    <RotateCcw size={16} />
+                    {credentialBusy() === "cancel" ? "Cancelling" : "Cancel update"}
                   </button>
                 </div>
-                <Show when={verified().pendingBackupCodes.length}>
-                  <div class="code-grid" aria-label="Generated backup codes">
-                    <For each={verified().pendingBackupCodes}>{(code) => <code>{code}</code>}</For>
-                  </div>
-                </Show>
-              </div>
-              <div class="button-row">
-                <button
-                  class="primary-action"
-                  type="button"
-                  disabled={!verified().canCommit || credentialControlsLocked()}
-                  onClick={() => void commitSelfServiceUpdate()}
-                >
-                  <ClipboardCheck size={16} />
-                  {credentialBusy() === "commit" ? "Committing" : "Commit credential update"}
-                </button>
-                <button
-                  class="danger-action"
-                  type="button"
-                  disabled={credentialControlsLocked()}
-                  onClick={() => void cancelSelfServiceUpdate()}
-                >
-                  <RotateCcw size={16} />
-                  {credentialBusy() === "cancel" ? "Cancelling" : "Cancel update"}
-                </button>
-              </div>
-            </>
-          )}
-        </Show>
-        <Show when={credentialMessage()}>
-          <div class="review-box success" role="status" aria-live="polite">
-            <BadgeCheck size={18} />
-            <span>{credentialMessage()}</span>
-          </div>
-        </Show>
-        <Show when={credentialError()}>
-          <div class="review-box danger" role="alert" aria-live="assertive">
-            <CircleAlert size={18} />
-            <span>{credentialError()}</span>
-          </div>
-        </Show>
-      </GlassPanel>
-      <GlassPanel title="Session and token safety">
-        <div class="button-row">
-          <button class="secondary-action" type="button" onClick={reauthenticate}>
-            <RefreshCw size={16} /> Reauth
-          </button>
-          <button class="secondary-action" type="button" onClick={() => void loadSessions()}>
-            <RefreshCw size={16} /> Refresh sessions
-          </button>
-        </div>
-        <Show when={sessionError()}>
-          <div class="review-box danger" role="alert" aria-live="assertive">
-            <CircleAlert size={18} />
-            <span>{sessionError()}</span>
-          </div>
-        </Show>
-        <div class="session-list">
-          <For each={sessions()}>
-            {(session) => (
-              <div class="session-row">
-                <div>
-                  <strong>{session.purpose}</strong>
-                  <span>{sessionStateLabel(session)}</span>
-                  <small>
-                    {shortId(session.sessionId)} issued {formatDateTime(session.issuedAt)}
-                  </small>
-                </div>
-                <button
-                  class="danger-action"
-                  type="button"
-                  disabled={session.state === "revoked" || busySession() === session.sessionId}
-                  onClick={() => void revokeSession(session.sessionId)}
-                >
-                  <Trash2 size={16} />
-                  {busySession() === session.sessionId ? "Revoking" : "Revoke session"}
-                </button>
-              </div>
+              </>
             )}
-          </For>
-        </div>
-        <Show when={!sessions().length && !sessionError()}>
-          <p class="muted">No active sessions returned for this account.</p>
-        </Show>
-      </GlassPanel>
+          </Show>
+          <Show when={credentialMessage()}>
+            <div class="review-box success" role="status" aria-live="polite">
+              <BadgeCheck size={18} />
+              <span>{credentialMessage()}</span>
+            </div>
+          </Show>
+          <Show when={credentialError()}>
+            <div class="review-box danger" role="alert" aria-live="assertive">
+              <CircleAlert size={18} />
+              <span>{credentialError()}</span>
+            </div>
+          </Show>
+        </GlassPanel>
+        <GlassPanel title="Session and token safety">
+          <div class="button-row">
+            <button class="secondary-action" type="button" onClick={reauthenticate}>
+              <RefreshCw size={16} /> Reauth
+            </button>
+            <button class="secondary-action" type="button" onClick={() => void loadSessions()}>
+              <RefreshCw size={16} /> Refresh sessions
+            </button>
+          </div>
+          <Show when={sessionError()}>
+            <div class="review-box danger" role="alert" aria-live="assertive">
+              <CircleAlert size={18} />
+              <span>{sessionError()}</span>
+            </div>
+          </Show>
+          <div class="session-list">
+            <For each={sessions()}>
+              {(session) => (
+                <div class="session-row">
+                  <div>
+                    <strong>{session.purpose}</strong>
+                    <span>{sessionStateLabel(session)}</span>
+                    <small>
+                      {shortId(session.sessionId)} issued {formatDateTime(session.issuedAt)}
+                    </small>
+                  </div>
+                  <button
+                    class="danger-action"
+                    type="button"
+                    disabled={session.state === "revoked" || busySession() === session.sessionId}
+                    onClick={() => void revokeSession(session.sessionId)}
+                  >
+                    <Trash2 size={16} />
+                    {busySession() === session.sessionId ? "Revoking" : "Revoke session"}
+                  </button>
+                </div>
+              )}
+            </For>
+          </div>
+          <Show when={!sessions().length && !sessionError()}>
+            <p class="muted">No active sessions returned for this account.</p>
+          </Show>
+        </GlassPanel>
+      </div>
     </>
   );
 }

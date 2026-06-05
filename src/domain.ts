@@ -197,6 +197,7 @@ export interface Application {
   scopeMaps?: ApplicationScopeMap[];
   supplementalScopeMaps?: ApplicationScopeMap[];
   claimMaps?: ApplicationClaimMap[];
+  policyToggles?: ApplicationPolicyToggles;
   status: "ready" | "draft" | "attention";
 }
 
@@ -220,11 +221,36 @@ export interface ApplicationClaimMap {
   rules: ApplicationClaimMapRule[];
 }
 
+export interface ApplicationPolicyToggles {
+  preferShortUsername: boolean;
+  consentPrompt: boolean;
+  jwtLegacyCrypto: boolean;
+  strictRedirectUri: boolean;
+  deviceFlow: boolean;
+  allowInsecureClientDisablePkce: boolean;
+  allowLocalhostRedirect: boolean;
+  refreshTokenExpiry: string;
+}
+
+export type ApplicationKeyAction = "rotate" | "revoke";
+
 export interface ApplicationPolicyInput {
   scopeMaps: ApplicationScopeMap[];
   supplementalScopeMaps: ApplicationScopeMap[];
   claimMaps: ApplicationClaimMap[];
+  policyToggles: ApplicationPolicyToggles;
 }
+
+export const defaultApplicationPolicyToggles: ApplicationPolicyToggles = {
+  preferShortUsername: false,
+  consentPrompt: false,
+  jwtLegacyCrypto: false,
+  strictRedirectUri: false,
+  deviceFlow: false,
+  allowInsecureClientDisablePkce: false,
+  allowLocalhostRedirect: false,
+  refreshTokenExpiry: "",
+};
 
 export interface AccessPath {
   app: Application;
