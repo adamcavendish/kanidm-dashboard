@@ -24,10 +24,18 @@ and `/ui` routes by a reverse proxy such as Caddy.
 
 ## Features
 
-- **Admin console** — manage people, groups, and OAuth2 applications with
-  review-before-submit wizards and access-impact previews
+- **Admin console** — split-panel list/detail views for people, groups, service
+  accounts, and OAuth2 applications with review-before-submit wizards
+- **Person inspector** — view/edit profiles, status, group membership,
+  certificates, sessions, SSH keys, RADIUS, and credential health
+- **Service account vault** — create service accounts, manage API tokens,
+  generate credentials, add SSH keys, and extend Unix settings
+- **OAuth policy workbench** — toggle policy attributes, manage scope/claim maps,
+  rotate keys, and configure advanced OAuth2 settings
+- **Admin maintenance** — schema browser, recycle bin with revive, and system
+  config
 - **Self-service portal** — users can manage their own credentials: password,
-  TOTP, passkeys, SSH public keys, RADIUS, and Unix account settings
+  TOTP, passkeys, backup codes, SSH public keys, RADIUS, and Unix account settings
 - **Credential update wizard** — multi-step state machine for enrolling new
   credentials via reset tokens
 - **Relationship explorer** — visualise how people, groups, and applications
@@ -76,19 +84,21 @@ browser
 ```
 src/
   domain.ts             Shared types: Person, Group, Application, ConsoleState
-  data-source.ts        DashboardDataSource interface + KanidmDataSource + MockDataSource
+  data-source.ts        DashboardDataSource interface (~60 methods) + KanidmDataSource + MockDataSource
   store.tsx             SolidJS context: state, auth, credential operations
   kanidm-auth.ts        Auth state machine: password, TOTP, passkey, backup code, security key
   kanidm-mappers.ts     Kanidm API response → domain model mapping
-  kanidm-composite.ts   Multi-step create operations: groups, OAuth2 apps
-  kanidm-error.ts       HTTP error types and auth-failure detection
-  seed.ts               Initial state and demo fixtures
-  App.tsx               Router, layout shells, and page components
-  components/           Shared UI components: ErrorBox, OptionGrid, GlassPanel, etc.
+  routing.tsx           SPA router with NavigationProvider, Link, NavLink
+  route-paths.ts        Route definitions and public-route guards
+  auth-return.ts        Post-login redirect for deep-link return paths
+  App.tsx               App shell, admin rail, and route wiring (~230 lines)
+  pages/                14 self-service + 9 admin route-level page components
+  components/           11 shared UI components
+  utils/                8 utility modules (format, webauthn, oauth, labels, etc.)
   generated/            TypeScript SDK generated from Kanidm OpenAPI spec
 ```
 
-The `DashboardDataSource` interface defines 31 CRUD methods. Two adapters
+The `DashboardDataSource` interface defines ~60 CRUD methods. Two adapters
 implement it:
 
 - **`KanidmDataSource`** — calls the Kanidm REST API via a generated TypeScript
@@ -220,10 +230,13 @@ requires `KANIDM_PASSWORD` in `.env.local`.
 vp run e2e-kanidm
 ```
 
-The main E2E test verifies 22 behaviours:
+The main E2E test verifies 25+ behaviours:
 
 - Admin login and expired session redirect
 - Group, person, and OAuth2 application creation through the UI
+- Person detail inspector: profile editing, status changes, group membership toggle
+- Service account creation, API token generation, credential and SSH key management
+- OAuth policy toggles, client secret reveal, scope/claim maps
 - Group membership toggling and nested relationship resolution
 - Domain image upload and reset
 - Credential setup (password, TOTP, backup codes) via reset token
