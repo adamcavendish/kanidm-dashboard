@@ -149,7 +149,7 @@ export function RelationshipsPage() {
                                       class="chip"
                                       title={`${group.displayName} / ${group.name}`}
                                     >
-                                      <span>{group.displayName}</span>
+                                      <span>{group.displayName || group.name}</span>
                                     </span>
                                   )}
                                 </For>
@@ -201,7 +201,9 @@ export function RelationshipsPage() {
                         <div class="access-path-node">
                           <GitBranch size={17} />
                           <span>
-                            <strong title={path.group.displayName}>{path.group.displayName}</strong>
+                            <strong title={path.group.displayName || path.group.name}>
+                              {path.group.displayName || path.group.name}
+                            </strong>
                             <small title={path.group.name}>
                               {path.membership === "direct"
                                 ? "direct membership"

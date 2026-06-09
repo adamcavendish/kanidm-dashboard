@@ -33,8 +33,8 @@ raw `node`, `vitest`, or `tsc` directly for normal project checks.
 - Real Kanidm recovery email E2E: `vp run e2e-recovery-mail-kanidm`
 - Real Kanidm add-user recovery email browser E2E:
   `vp run e2e-add-user-recovery-mail-kanidm`
-- Orb Chrysa live OAuth sample-app follow-up:
-  `docs/test-plans/orb-chrysa-live-oauth.md`
+- Layerhouse live OAuth sample-app follow-up:
+  `docs/test-plans/layerhouse-live-oauth.md`
 - Bootstrap local Kanidm mail capture: `vp run kanidm-mail-bootstrap` or
   `./scripts/dev-kanidm-mail.sh` for the full Docker Compose mail profile
 - Run project scripts directly through managed Node: `vp node scripts/<script>.mjs`
@@ -87,7 +87,7 @@ the shell before running `vp run <task>`.
 
 The main E2E task signs in through the dashboard, confirms the portal-first flow,
 enters the admin console, creates a parent access group, a child member group, a
-person, and an Orb Chrysa-style OAuth2 application. It verifies nested
+person, and an Layerhouse-style OAuth2 application. It verifies nested
 group-to-application effective access, per-access-group scope-map reload, OAuth2 app
 image upload/reset, confidential client-secret display, native Kanidm OAuth2
 discovery, native `/ui/oauth2` consent, native OAuth access denial, initial user credential
@@ -286,7 +286,7 @@ The same visual smoke task also runs targeted mobile stress fixtures:
 - Many groups and people.
 - Nested group-to-application access relationships.
 - Dense relationship explorer rendering.
-- Populated Orb Chrysa add-application scope-map editor with separate
+- Populated Layerhouse add-application scope-map editor with separate
   `registry_admins` and `registry_developers` scopes.
 
 ## Browser QA Coverage
@@ -346,15 +346,15 @@ Use the running Vite+ dev server (`vp dev`) for interactive checks.
     preserves `code` and `state`. The same test signs in as `idm_admin`, which
     lacks the disposable app access group, and verifies Kanidm's native
     `Access Denied` page at `/ui/oauth2/resume`.
-  - The real E2E keeps the Orb Chrysa callback
+  - The real E2E keeps the Layerhouse callback
     `http://localhost:5050/oauth2/callback` on the created app, and adds a
     same-origin `/oauth-test-callback` redirect URI only so Playwright can
     capture the authorization-code redirect without running a separate Orb
     Chrysa server.
-  - Live Orb Chrysa `/oauth2/start` to `/oauth2/callback` token exchange passed
-    after the Orb Chrysa setup mapping fix. The setup and follow-up gate are
+  - Live Layerhouse `/oauth2/start` to `/oauth2/callback` token exchange passed
+    after the Layerhouse setup mapping fix. The setup and follow-up gate are
     tracked in
-    `docs/test-plans/orb-chrysa-live-oauth.md`.
+    `docs/test-plans/layerhouse-live-oauth.md`.
 - Account recovery:
   - Mock mode shows a privacy-preserving success response after submitting a
     username or email.
@@ -409,11 +409,11 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
     for `managedby`; `vp run e2e-kanidm` verifies the warning path and still
     continues through nested group access.
   - Application creation supports per-access-group OAuth2 scope maps. This is
-    required for the Orb Chrysa shape where `registry_admins` receives
+    required for the Layerhouse shape where `registry_admins` receives
     `openid profile email oci_admin` and `registry_developers` receives
     `openid profile email oci_push oci_pull`; the dashboard must not force both
     groups to receive the same union of scopes.
-  - Unit coverage verifies separate Kanidm scopemap writes for the Orb Chrysa
+  - Unit coverage verifies separate Kanidm scopemap writes for the Layerhouse
     admin and developer groups.
 - Profile page:
   - Mock mode display name, legal name, and email save through reviewed profile
@@ -621,10 +621,10 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
   light/dark routes: pass
 - Visual smoke mobile stress fixtures for empty portal, long app names, many
   groups, and nested relationships: pass
-- Visual smoke populated Orb Chrysa scope-map editor on `/admin/apps/new`: pass
-- Live Orb Chrysa `/oauth2/start` to `/oauth2/callback` sample-app token
-  exchange: passed after the Orb Chrysa setup mapping fix documented in
-  `docs/test-plans/orb-chrysa-live-oauth.md`
+- Visual smoke populated Layerhouse scope-map editor on `/admin/apps/new`: pass
+- Live Layerhouse `/oauth2/start` to `/oauth2/callback` sample-app token
+  exchange: passed after the Layerhouse setup mapping fix documented in
+  `docs/test-plans/layerhouse-live-oauth.md`
 
 Screenshots from the latest local browser verification:
 
@@ -652,9 +652,9 @@ Screenshots from the latest local browser verification:
   `vp run e2e-kanidm`, `vp run e2e-webauthn-kanidm`, and
   `vp run e2e-recovery-mail-kanidm` passed on the running 1.10.3 compose stack.
   Re-run them after any Kanidm API or admin-flow change.
-- Orb Chrysa live sample-app OAuth passed after the setup mapping fix. The
+- Layerhouse live sample-app OAuth passed after the setup mapping fix. The
   dashboard also verifies Kanidm-native OAuth discovery, consent, callback
-  preservation, access denial, and Orb Chrysa-shaped app creation.
+  preservation, access denial, and Layerhouse-shaped app creation.
 - Passkey and attested-passkey reset-token setup/removal is implemented with
   Kanidm `passkeyinit`/`passkeyfinish`, `attestedpasskeyinit`/
   `attestedpasskeyfinish`, `{ "passkeyremove": uuid }`, and

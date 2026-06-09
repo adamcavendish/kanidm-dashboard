@@ -8,7 +8,7 @@ const mockConfig = JSON.parse(
   await readFile(new URL("./fixtures/dashboard.config.mock.json", import.meta.url), "utf8"),
 );
 
-const longCompanyName = "Kanidm Dashboard Identity Operations And Orb Chrysa Registry Console";
+const longCompanyName = "Kanidm Dashboard Identity Operations And Layerhouse Registry Console";
 const longLoginMessage =
   "Sign in to review applications, credentials, recovery settings, and administrator access relationships.";
 
@@ -319,7 +319,7 @@ function largeRelationshipState() {
       {
         id: appGroupId,
         name: `app_access_long_named_service_${index}`,
-        displayName: `Access group for a very long Orb Chrysa service name ${index}`,
+        displayName: `Access group for a very long Layerhouse service name ${index}`,
         description:
           "Parent application access group used to verify nested relationship rendering.",
         members: [],
@@ -342,13 +342,13 @@ function largeRelationshipState() {
     );
     apps.push({
       id: `app-long-${index}`,
-      name: `orb_chrysa_registry_and_deployment_service_${index}`,
-      displayName: `Orb Chrysa Registry Deployment Control Plane ${index} With Long Name`,
-      landingUrl: `https://orb-chrysa-${index}.very-long-subdomain.aster.example/applications/launch`,
+      name: `layerhouse_registry_and_deployment_service_${index}`,
+      displayName: `Layerhouse Registry Deployment Control Plane ${index} With Long Name`,
+      landingUrl: `https://layerhouse-${index}.very-long-subdomain.aster.example/applications/launch`,
       imageUrl: "",
       clientType: index % 2 === 0 ? "confidential" : "public",
       redirectUris: [
-        `https://orb-chrysa-${index}.very-long-subdomain.aster.example/oauth/callback`,
+        `https://layerhouse-${index}.very-long-subdomain.aster.example/oauth/callback`,
       ],
       allowedGroups: [appGroupId],
       scopes: ["openid", "profile", "email", "groups", "oci_pull", "oci_push"],
@@ -373,7 +373,7 @@ function largeRelationshipState() {
   };
 }
 
-function orbChrysaScopeMapState() {
+function layerhouseScopeMapState() {
   return {
     role: "admin",
     currentUserId: "u-ava",
@@ -402,7 +402,7 @@ function orbChrysaScopeMapState() {
         id: "g-registry-admins",
         name: "registry_admins",
         displayName: "registry_admins",
-        description: "Orb Chrysa administrators receive the oci_admin scope.",
+        description: "Layerhouse administrators receive the oci_admin scope.",
         members: ["u-ava"],
         parentGroups: [],
         managedBy: "g-admins",
@@ -411,7 +411,7 @@ function orbChrysaScopeMapState() {
         id: "g-registry-developers",
         name: "registry_developers",
         displayName: "registry_developers",
-        description: "Orb Chrysa developers receive push and pull scopes.",
+        description: "Layerhouse developers receive push and pull scopes.",
         members: ["u-ava"],
         parentGroups: [],
         managedBy: "g-admins",
@@ -503,22 +503,22 @@ try {
     name: "stress-large",
     state: largeRelationshipState(),
     routes: [
-      { path: "/portal", readyText: "Orb Chrysa Registry Deployment Control Plane" },
+      { path: "/portal", readyText: "Layerhouse Registry Deployment Control Plane" },
       { path: "/admin/groups", readyText: "Engineering Platform Operations Team" },
-      { path: "/admin/apps", readyText: "Orb Chrysa Registry Deployment Control Plane" },
+      { path: "/admin/apps", readyText: "Layerhouse Registry Deployment Control Plane" },
       { path: "/admin/relationships", readyText: "Effective access" },
     ],
   });
 
   await runStressScenario(browser, {
     name: "stress-orb-scope-map",
-    state: orbChrysaScopeMapState(),
+    state: layerhouseScopeMapState(),
     routes: [
       {
         path: "/admin/apps/new",
         readyText: "registry_developers",
         prepare: async (page) => {
-          await page.getByRole("button", { name: "Use Orb Chrysa defaults" }).click();
+          await page.getByRole("button", { name: "Use Layerhouse defaults" }).click();
           const adminScopes = page.locator(".scope-map-row").filter({ hasText: "registry_admins" });
           await adminScopes.getByText("oci_admin").waitFor();
           const developerScopes = page

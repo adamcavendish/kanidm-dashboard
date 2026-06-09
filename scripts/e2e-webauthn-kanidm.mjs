@@ -89,9 +89,11 @@ async function createPerson(page) {
 async function issueResetUrl(page) {
   await selectInternalLink(page, /^People$/, /\/admin\/people$/);
   await page.getByPlaceholder("Search people").fill(personName);
-  const row = page.locator("tr").filter({ hasText: personName });
-  await row.getByRole("button", { name: /Issue reset/ }).click();
-  await page.getByRole("button", { name: /^Issue token$/ }).click();
+  // Select the person in the side list to open the detail panel
+  const personButton = page.getByRole("button", { name: new RegExp(personName) });
+  await personButton.waitFor({ timeout: 10000 });
+  await personButton.click();
+  await page.getByRole("button", { name: /Issue reset/ }).click();
   await page.getByLabel("Reset URL").waitFor({ timeout: 20000 });
   return page.getByLabel("Reset URL").inputValue();
 }

@@ -6,15 +6,15 @@ const dashboardUrl = envValue(
   "KANIDM_DASHBOARD_URL",
   envValue("DASHBOARD_URL", "http://localhost:5173"),
 );
-const orbChrysaUrl = envValue("ORB_CHRYSA_URL", "http://localhost:5050");
-const orbClientId = envValue("ORB_CHRYSA_CLIENT_ID", "orb-chrysa");
+const layerhouseUrl = envValue("LAYERHOUSE_URL", "http://localhost:5050");
+const orbClientId = envValue("LAYERHOUSE_CLIENT_ID", "layerhouse");
 const username = envValue("KANIDM_USERNAME", "idm_admin");
 const password = envValue("KANIDM_PASSWORD");
 const screenshotDir = envValue("E2E_SCREENSHOT_DIR", "/tmp");
 
 if (!password) {
   console.error(
-    "Set KANIDM_PASSWORD in the environment or .env.local to run the Orb Chrysa live OAuth E2E test.",
+    "Set KANIDM_PASSWORD in the environment or .env.local to run the Layerhouse live OAuth E2E test.",
   );
   process.exit(2);
 }
@@ -22,8 +22,8 @@ if (!password) {
 const stamp = Date.now().toString().slice(-6);
 const userPersonName = `orbuser_${stamp}`;
 const userPassword = `OrbLive-${stamp}-Credential!`;
-const screenshotPath = `${screenshotDir}/kanidm-dashboard-orb-chrysa-live-oauth.png`;
-const failurePath = `${screenshotDir}/kanidm-dashboard-orb-chrysa-live-oauth-failure.png`;
+const screenshotPath = `${screenshotDir}/kanidm-dashboard-layerhouse-live-oauth.png`;
+const failurePath = `${screenshotDir}/kanidm-dashboard-layerhouse-live-oauth-failure.png`;
 
 const logs = [];
 const apiResponses = [];
@@ -40,7 +40,7 @@ function appUrl(path) {
 }
 
 function orbUrl(path) {
-  return new URL(path, orbChrysaUrl).href;
+  return new URL(path, layerhouseUrl).href;
 }
 
 async function selectInternalLink(page, name, urlPattern) {
@@ -159,14 +159,14 @@ async function setUserCredentials(page, resetUrl) {
 async function verifyOrbChrysaAppInAdmin(page) {
   await selectInternalLink(page, /^Applications$/, /\/admin\/apps$/);
 
-  const appRow = page.locator("tr").filter({ hasText: /Orb Chrysa/ });
+  const appRow = page.locator("tr").filter({ hasText: /Layerhouse/ });
   try {
     await appRow.waitFor({ timeout: 10000 });
   } catch (error) {
     if (error instanceof Error && error.message.includes("Timeout")) {
       throw new Error(
-        `Orb Chrysa OAuth2 client "${orbClientId}" was not found in the application catalog. ` +
-          `It should be created by Orb Chrysa's kanidm-setup.sh. Ensure the dashboard is proxying to the same Kanidm instance that Orb Chrysa uses.`,
+        `Layerhouse OAuth2 client "${orbClientId}" was not found in the application catalog. ` +
+          `It should be created by Layerhouse's kanidm-setup.sh. Ensure the dashboard is proxying to the same Kanidm instance that Layerhouse uses.`,
       );
     }
     throw error;
@@ -188,7 +188,7 @@ async function verifyLiveOrbChrysaOAuthFlow(browser) {
 
     if (!flowPage.url().includes("/ui/oauth2")) {
       throw new Error(
-        `Orb Chrysa /oauth2/start did not redirect to Kanidm OAuth. Current URL: ${flowPage.url()}`,
+        `Layerhouse /oauth2/start did not redirect to Kanidm OAuth. Current URL: ${flowPage.url()}`,
       );
     }
 
@@ -210,8 +210,8 @@ async function verifyLiveOrbChrysaOAuthFlow(browser) {
       .waitFor({ timeout: 20000 });
 
     const pageText = await flowPage.locator("body").innerText();
-    if (!pageText.includes(orbClientId) && !pageText.includes("Orb Chrysa")) {
-      throw new Error(`Consent page did not reference the Orb Chrysa application.`);
+    if (!pageText.includes(orbClientId) && !pageText.includes("Layerhouse")) {
+      throw new Error(`Consent page did not reference the Layerhouse application.`);
     }
 
     const callbackRequestPromise = flowPage.waitForRequest(
@@ -223,10 +223,10 @@ async function verifyLiveOrbChrysaOAuthFlow(browser) {
     const callbackRequest = await callbackRequestPromise;
     const callbackUrl = new URL(callbackRequest.url());
     if (!callbackUrl.searchParams.get("code")) {
-      throw new Error(`Orb Chrysa OAuth callback did not include a code: ${callbackUrl.href}`);
+      throw new Error(`Layerhouse OAuth callback did not include a code: ${callbackUrl.href}`);
     }
     if (!callbackUrl.searchParams.get("state")) {
-      throw new Error(`Orb Chrysa OAuth callback did not include state: ${callbackUrl.href}`);
+      throw new Error(`Layerhouse OAuth callback did not include state: ${callbackUrl.href}`);
     }
 
     await flowPage.waitForURL(orbUrl("/"), { timeout: 20000 }).catch(() => {});
@@ -238,11 +238,11 @@ async function verifyLiveOrbChrysaOAuthFlow(browser) {
       });
       const body = await response.text();
       return { status: response.status, ok: response.ok, body };
-    }, orbChrysaUrl);
+    }, layerhouseUrl);
 
     if (!sessionResponse.ok) {
       throw new Error(
-        `Orb Chrysa /api/v1/session returned HTTP ${sessionResponse.status}: ${sessionResponse.body}`,
+        `Layerhouse /api/v1/session returned HTTP ${sessionResponse.status}: ${sessionResponse.body}`,
       );
     }
 
@@ -251,13 +251,13 @@ async function verifyLiveOrbChrysaOAuthFlow(browser) {
       sessionData = JSON.parse(sessionResponse.body);
     } catch {
       throw new Error(
-        `Orb Chrysa /api/v1/session did not return valid JSON: ${sessionResponse.body}`,
+        `Layerhouse /api/v1/session did not return valid JSON: ${sessionResponse.body}`,
       );
     }
 
     if (!sessionData.authenticated && !sessionData.username && !sessionData.name) {
       throw new Error(
-        `Orb Chrysa /api/v1/session did not report an authenticated identity: ${sessionResponse.body}`,
+        `Layerhouse /api/v1/session did not report an authenticated identity: ${sessionResponse.body}`,
       );
     }
 
@@ -282,7 +282,7 @@ async function verifyAccessDeniedFlow(browser) {
 
     if (!deniedPage.url().includes("/ui/oauth2")) {
       throw new Error(
-        `Orb Chrysa /oauth2/start did not redirect to Kanidm OAuth for access-denied check.`,
+        `Layerhouse /oauth2/start did not redirect to Kanidm OAuth for access-denied check.`,
       );
     }
 
@@ -394,7 +394,7 @@ async function main() {
         {
           ok: true,
           dashboardUrl,
-          orbChrysaUrl,
+          layerhouseUrl,
           orbClientId,
           userPersonName,
           orbAppVerified: true,
@@ -419,7 +419,7 @@ async function main() {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
           dashboardUrl,
-          orbChrysaUrl,
+          layerhouseUrl,
           orbClientId,
           userPersonName,
           apiResponses,
