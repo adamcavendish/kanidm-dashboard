@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import { BadgeCheck, CircleAlert } from "lucide-solid";
+import { BadgeCheck, CircleAlert, Info } from "lucide-solid";
 import type { GroupCreationResult, NewGroupInput } from "../../domain";
 import { useConsole } from "../../store";
 import GlassPanel from "../../components/glass-panel";
@@ -16,6 +16,7 @@ export function NewGroupPage() {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
   const [created, setCreated] = createSignal<GroupCreationResult | null>(null);
+  const [showParentGroupHelp, setShowParentGroupHelp] = createSignal(false);
   const [input, setInput] = createSignal<NewGroupInput>({
     name: "",
     displayName: "",
@@ -107,6 +108,28 @@ export function NewGroupPage() {
             />
           </GlassPanel>
           <GlassPanel title="Parent groups">
+            <div class="member-panel-summary">
+              <span>Parent groups receive this new group as a child.</span>
+              <button
+                class="info-trigger group-info-trigger"
+                type="button"
+                aria-label="How parent group selection works"
+                aria-expanded={showParentGroupHelp()}
+                title="How parent group selection works"
+                onClick={() => setShowParentGroupHelp((value) => !value)}
+              >
+                <Info size={16} />
+              </button>
+            </div>
+            <Show when={showParentGroupHelp()}>
+              <div class="review-box group-membership-help">
+                <Info size={18} />
+                <span>
+                  Selecting group B here makes the new group a child of B. Direct members of the new
+                  group will appear as inherited effective members when viewing group B.
+                </span>
+              </div>
+            </Show>
             <OptionGrid
               options={state().groups.map((group) => ({
                 id: group.id,
