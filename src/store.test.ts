@@ -115,8 +115,8 @@ describe("relationship helpers", () => {
       [
         {
           attrs: {
-            name: ["orb-chrysa"],
-            displayname: ["Orb Chrysa"],
+            name: ["layerhouse"],
+            displayname: ["Layerhouse"],
             oauth2_rs_origin_landing: ["http://localhost:5050/"],
             oauth2_rs_scope_map: ['registry_parent@localhost: {"openid", "oci_pull"}'],
             oauth2_rs_sup_scope_map: ['registry_child@localhost: {"oci_push"}'],

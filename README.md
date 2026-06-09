@@ -272,7 +272,7 @@ for Kanidm API routes.
 
 - [Production deployment runbook](docs/runbooks/production-deployment.md)
 - [Email delivery runbook](docs/runbooks/production-email-delivery.md)
-- [Orb Chrysa live OAuth test plan](docs/test-plans/orb-chrysa-live-oauth.md)
+- [Layerhouse live OAuth test plan](docs/test-plans/layerhouse-live-oauth.md)
 
 ## License
 

@@ -29,8 +29,8 @@ const kanidmTaskEnv = [
   "CONTAINER_SMOKE_PORT",
   "CONTAINER_SMOKE_IMAGE",
   "KANIDM_DASHBOARD_IMAGE",
-  "ORB_CHRYSA_URL",
-  "ORB_CHRYSA_CLIENT_ID",
+  "LAYERHOUSE_URL",
+  "LAYERHOUSE_CLIENT_ID",
 ];
 
 export default defineConfig({
@@ -89,8 +89,8 @@ export default defineConfig({
         command: "vp exec node scripts/registry-image-smoke.mjs",
         untrackedEnv: kanidmTaskEnv,
       },
-      "e2e-orb-chrysa-live-oauth": {
-        command: "vp exec node scripts/e2e-orb-chrysa-live-oauth.mjs",
+      "e2e-layerhouse-live-oauth": {
+        command: "vp exec node scripts/e2e-layerhouse-live-oauth.mjs",
         untrackedEnv: kanidmTaskEnv,
       },
     },
