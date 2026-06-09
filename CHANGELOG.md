@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.4 (2026-06-09)
+
+### Rename
+
+- Orb Chrysa → Layerhouse across all source, tests, docs, and scripts
+
+### Fixes
+
+- WebAuthn E2E test: fix `issueResetUrl` after people-list split-panel refactor
+- Relationships page: fallback to system name for groups without displayname
+
 ## 0.0.3 (2026-06-08)
 
 ### Features
