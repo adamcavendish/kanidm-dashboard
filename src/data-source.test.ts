@@ -599,6 +599,9 @@ describe("KanidmDataSource", () => {
         body: typeof init?.body === "string" ? init.body : "",
       });
 
+      if (requestUrl.endsWith("/v1/group/idm_unix_admins/_attr/class")) {
+        return new Response(JSON.stringify(["object", "group", "posixgroup"]), { status: 200 });
+      }
       if (requestUrl.endsWith("/v1/group/idm_unix_admins/_unix/_token")) {
         return new Response(
           JSON.stringify({
@@ -743,6 +746,7 @@ describe("KanidmDataSource", () => {
       const findCall = (method: string, path: string) =>
         calls.find((call) => call.method === method && call.url.endsWith(path));
 
+      expect(findCall("GET", "/v1/group/idm_unix_admins/_attr/class")).toBeTruthy();
       expect(findCall("POST", "/v1/group/idm_unix_admins/_unix")?.body).toBe(
         JSON.stringify({ gidnumber: 2401 }),
       );
@@ -761,6 +765,40 @@ describe("KanidmDataSource", () => {
         JSON.stringify(["Updated"]),
       );
       expect(findCall("DELETE", "/v1/system/_attr/description")?.body).toBe("");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips group Unix token reads for non-POSIX Kanidm groups", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      const method = init?.method ?? "GET";
+      calls.push({ url: requestUrl, method });
+
+      if (requestUrl.endsWith("/v1/group/layerhouse_developers/_attr/class")) {
+        return new Response(JSON.stringify(["object", "group"]), { status: 200 });
+      }
+      if (requestUrl.endsWith("/v1/group/layerhouse_developers/_unix/_token")) {
+        return new Response(null, { status: 500 });
+      }
+
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const ds = new KanidmDataSource({
+        mode: "kanidm",
+        apiBasePath: "",
+        openApiPath: "/docs/v1/openapi.json",
+      });
+
+      await expect(ds.groupUnixSettings("layerhouse_developers")).resolves.toBeNull();
+      expect(
+        calls.some((call) => call.url.endsWith("/v1/group/layerhouse_developers/_unix/_token")),
+      ).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }

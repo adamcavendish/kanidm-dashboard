@@ -370,6 +370,16 @@ export class KanidmDataSource implements DashboardDataSource {
   }
 
   async groupUnixSettings(id: string): Promise<GroupUnixSettings | null> {
+    const attrApi = new GroupAttrApi(this.config);
+    try {
+      const classes = await attrApi.groupIdAttrGet({ id, attr: "class" });
+      if (!classes.some((item) => item.toLowerCase() === "posixgroup")) return null;
+    } catch (error) {
+      const status = kanidmErrorStatus(error);
+      if (status && [400, 404].includes(status)) return null;
+      throw error;
+    }
+
     try {
       const token = await new GroupUnixApi(this.config).groupIdUnixTokenGet({ id });
       return {
