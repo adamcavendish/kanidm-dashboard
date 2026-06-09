@@ -1,6 +1,6 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
-import { Check, ClipboardCheck, GitBranch, Plus, ServerCog, Trash2 } from "lucide-solid";
-import type { Group, GroupPolicyAttribute, GroupUnixSettings } from "../../domain";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { Check, ClipboardCheck, GitBranch, Info, Plus, ServerCog, Trash2 } from "lucide-solid";
+import type { Group, GroupPolicyAttribute, GroupUnixSettings, Person } from "../../domain";
 import { resolveGroupClosure, useConsole } from "../../store";
 import ErrorBox from "../../components/error-box";
 import GlassPanel from "../../components/glass-panel";
@@ -13,7 +13,6 @@ import { labelForGroup } from "../../utils/labels";
 export function GroupsPage() {
   const {
     state,
-    getPeopleForGroup,
     deleteGroup,
     updateGroup,
     addGroupMembers,
@@ -32,6 +31,8 @@ export function GroupsPage() {
   const [editMembers, setEditMembers] = createSignal<string[]>([]);
   const [editing, setEditing] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
+  const [showParentGroupHelp, setShowParentGroupHelp] = createSignal(false);
+  const [showParentGroupEditHelp, setShowParentGroupEditHelp] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [maintenanceBusy, setMaintenanceBusy] = createSignal("");
   const [error, setError] = createSignal("");
@@ -63,6 +64,29 @@ export function GroupsPage() {
     state().apps.filter((app) =>
       app.allowedGroups.some((groupId) => selectedGroupClosure().includes(groupId)),
     );
+  const effectivePeopleForGroup = (groupId: string) =>
+    state().people.filter((person) => personEffectiveGroupIds(person, state().groups).has(groupId));
+  const selectedEffectivePeople = createMemo(() =>
+    hasSelectedGroup() ? effectivePeopleForGroup(selectedGroup().id) : [],
+  );
+  const selectedGroupHasDirectPerson = (
+    person: Person,
+    refs = selectedGroup().members,
+    includePersonGroups = true,
+  ) =>
+    (includePersonGroups && person.groups.includes(selectedGroup().id)) ||
+    refs.some((ref) => memberRefMatchesPerson(ref, person));
+  const selectedDirectPeople = createMemo(() =>
+    hasSelectedGroup()
+      ? state().people.filter((person) => selectedGroupHasDirectPerson(person))
+      : [],
+  );
+  const selectedInheritedPeople = createMemo(() =>
+    selectedEffectivePeople().filter((person) => !selectedGroupHasDirectPerson(person)),
+  );
+  const selectedParentLabels = createMemo(() =>
+    selectedGroup().parentGroups.map((groupId) => labelForGroup(state().groups, groupId)),
+  );
 
   createEffect(() => {
     const g = selectedGroup();
@@ -74,6 +98,7 @@ export function GroupsPage() {
       setEditMembers([...g.members]);
       setEditing(false);
       setDeleting(false);
+      setShowParentGroupEditHelp(false);
       setError("");
     }
   });
@@ -198,7 +223,11 @@ export function GroupsPage() {
           >
             {(group) => (
               <button
-                class={group.id === selectedGroup().id ? "resource-row active" : "resource-row"}
+                class={
+                  group.id === selectedGroup().id
+                    ? "resource-row count-row active"
+                    : "resource-row count-row"
+                }
                 type="button"
                 onClick={() => setSelectedGroupId(group.id)}
               >
@@ -207,7 +236,7 @@ export function GroupsPage() {
                   <strong>{group.displayName}</strong>
                   <small>{group.name}</small>
                 </span>
-                <b>{group.members.length}</b>
+                <b>{effectivePeopleForGroup(group.id).length}</b>
               </button>
             )}
           </For>
@@ -239,6 +268,16 @@ export function GroupsPage() {
                           .map((app) => app.displayName)
                           .join(", ") || "None"
                       }
+                    />
+                    <KeyValue
+                      label="Parent groups"
+                      value={selectedParentLabels().join(", ") || "None"}
+                    />
+                    <KeyValue
+                      label="Members"
+                      value={`${selectedDirectPeople().length} direct / ${
+                        selectedInheritedPeople().length
+                      } inherited`}
                     />
                     <p class="muted">{selectedGroup().description || "No description"}</p>
                     <ErrorBox error={error} />
@@ -401,6 +440,31 @@ export function GroupsPage() {
 
             <Show when={editing()}>
               <GlassPanel title="Parent groups">
+                <div class="member-panel-summary">
+                  <span>
+                    Parent groups receive this group as a child and inherit its effective members.
+                  </span>
+                  <button
+                    class="info-trigger group-info-trigger"
+                    type="button"
+                    aria-label="How parent group selection works"
+                    aria-expanded={showParentGroupEditHelp()}
+                    title="How parent group selection works"
+                    onClick={() => setShowParentGroupEditHelp((value) => !value)}
+                  >
+                    <Info size={16} />
+                  </button>
+                </div>
+                <Show when={showParentGroupEditHelp()}>
+                  <div class="review-box group-membership-help">
+                    <Info size={18} />
+                    <span>
+                      Selecting group B here makes the current group a child of B. Direct members of
+                      the current group then appear as inherited effective members when viewing
+                      group B.
+                    </span>
+                  </div>
+                </Show>
                 <div class="option-grid">
                   <For each={state().groups.filter((g) => g.id !== selectedGroup().id)}>
                     {(parent) => {
@@ -434,27 +498,53 @@ export function GroupsPage() {
             </Show>
 
             <GlassPanel title="Members">
+              <div class="member-panel-summary">
+                <span>
+                  {selectedDirectPeople().length} direct / {selectedInheritedPeople().length}{" "}
+                  inherited effective members
+                </span>
+                <button
+                  class="info-trigger group-info-trigger"
+                  type="button"
+                  aria-label="How parent group membership works"
+                  aria-expanded={showParentGroupHelp()}
+                  title="How parent group membership works"
+                  onClick={() => setShowParentGroupHelp((value) => !value)}
+                >
+                  <Info size={16} />
+                </button>
+              </div>
+              <Show when={showParentGroupHelp()}>
+                <div class="review-box group-membership-help">
+                  <Info size={18} />
+                  <span>
+                    Parent groups grant membership upward. If group A has parent group B, every
+                    direct member of A is an inherited effective member of B. Add or remove direct
+                    members on the child group when you want to change inherited membership.
+                  </span>
+                </div>
+              </Show>
               <div class="member-grid">
                 <For each={state().people}>
                   {(person) => {
                     const isDirectMember = () =>
                       editing()
-                        ? editMembers().some((ref) => memberRefMatchesPerson(ref, person))
+                        ? selectedGroupHasDirectPerson(person, editMembers(), false)
                         : selectedGroup().members.some((ref) =>
                             memberRefMatchesPerson(ref, person),
-                          );
+                          ) || selectedGroupHasDirectPerson(person);
                     const isInheritedMember = () =>
                       !isDirectMember() &&
-                      getPeopleForGroup(selectedGroup().id).some((m) => m.id === person.id);
+                      personEffectiveGroupIds(person, state().groups).has(selectedGroup().id);
                     const inheritedFrom = () => {
                       if (!isInheritedMember()) return "";
-                      const parent = state().groups.find(
-                        (g) =>
-                          g.id !== selectedGroup().id &&
-                          g.members.some((ref) => ref === person.id || ref.includes(person.id)) &&
-                          getPeopleForGroup(selectedGroup().id).some((m) => m.id === person.id),
+                      const sources = inheritedSourceGroups(
+                        person,
+                        selectedGroup().id,
+                        state().groups,
                       );
-                      return parent ? `Inherited from ${parent.displayName}` : "Inherited";
+                      if (!sources.length) return "Inherited";
+                      return sources.map((group) => group.displayName).join(", ");
                     };
                     return (
                       <button
@@ -477,19 +567,33 @@ export function GroupsPage() {
                           );
                         }}
                       >
-                        <span class="avatar">{initials(person.displayName)}</span>
-                        {person.displayName}
+                        <span class="avatar member-avatar">{initials(person.displayName)}</span>
+                        <span class="member-identity">
+                          <strong class="member-name" title={person.displayName}>
+                            {person.displayName}
+                          </strong>
+                          <small class="member-username" title={person.username}>
+                            {person.username}
+                          </small>
+                          <Show when={isInheritedMember()}>
+                            <small
+                              class="member-source"
+                              title={`Inherited through ${inheritedFrom()}`}
+                            >
+                              <GitBranch size={12} />
+                              <span>Inherited through {inheritedFrom()}</span>
+                            </small>
+                          </Show>
+                        </span>
                         <Show when={isDirectMember()}>
                           <small class="member-kind">Direct</small>
                         </Show>
-                        <Show when={isInheritedMember()}>
-                          <small class="member-kind">{inheritedFrom()}</small>
-                        </Show>
-                        <Show when={editing() && !isDirectMember()}>
-                          <Plus size={14} />
-                        </Show>
-                        <Show when={editing() && isDirectMember()}>
-                          <Check size={14} />
+                        <Show when={editing()}>
+                          <span class="member-action" aria-hidden="true">
+                            <Show when={isDirectMember()} fallback={<Plus size={14} />}>
+                              <Check size={14} />
+                            </Show>
+                          </span>
                         </Show>
                       </button>
                     );
@@ -597,5 +701,39 @@ function memberRefMatchesPerson(ref: string, person: { id: string; username: str
     ref === person.username ||
     ref.includes(person.id) ||
     ref.includes(person.username)
+  );
+}
+
+function directGroupIdsForPerson(
+  person: Pick<Person, "groups" | "id" | "username">,
+  groups: Group[],
+) {
+  const ids = new Set(person.groups);
+  groups.forEach((group) => {
+    if (group.members.some((ref) => memberRefMatchesPerson(ref, person))) {
+      ids.add(group.id);
+    }
+  });
+  return ids;
+}
+
+function personEffectiveGroupIds(
+  person: Pick<Person, "groups" | "id" | "username">,
+  groups: Group[],
+) {
+  return new Set(resolveGroupClosure([...directGroupIdsForPerson(person, groups)], groups));
+}
+
+function inheritedSourceGroups(
+  person: Pick<Person, "groups" | "id" | "username">,
+  targetGroupId: string,
+  groups: Group[],
+) {
+  const directGroupIds = directGroupIdsForPerson(person, groups);
+  return groups.filter(
+    (group) =>
+      group.id !== targetGroupId &&
+      directGroupIds.has(group.id) &&
+      resolveGroupClosure([group.id], groups).includes(targetGroupId),
   );
 }

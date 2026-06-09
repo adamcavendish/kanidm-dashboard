@@ -1197,6 +1197,23 @@ td small {
   min-width: 0;
 }
 
+.resource-row.count-row {
+  grid-template-columns: 42px minmax(0, 1fr) max-content;
+}
+
+.resource-row.count-row > b {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
+  min-width: 1.5ch;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .resource-row.active,
 .resource-row:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -1235,7 +1252,7 @@ td small {
 }
 
 .member-grid {
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .option-grid {
@@ -1446,9 +1463,6 @@ td small {
 
 .member-pill,
 .option-card {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
   gap: 9px;
   min-width: 0;
   min-height: 46px;
@@ -1458,15 +1472,34 @@ td small {
   padding: 8px 10px;
   cursor: pointer;
   line-height: 1.2;
-  overflow-wrap: anywhere;
   text-align: left;
-  white-space: normal;
+}
+
+.member-pill {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(68px, max-content) 22px;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+}
+
+.member-pill:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.member-pill:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
 }
 
 .option-card {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
   text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .option-card small {
@@ -1483,12 +1516,107 @@ td small {
 .member-pill.inherited {
   border-color: color-mix(in srgb, var(--muted) 40%, var(--line));
   background: color-mix(in srgb, var(--muted) 6%, var(--panel));
+  border-left-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-left-width: 3px;
+}
+
+.member-avatar {
+  align-self: center;
+  justify-self: center;
+}
+
+.member-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.member-name,
+.member-username,
+.member-source span,
+.member-kind {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-name {
+  color: var(--text);
+  font-size: 0.94rem;
+  line-height: 1.15;
+}
+
+.member-username {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.member-source {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: color-mix(in srgb, var(--muted) 88%, var(--accent));
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.member-source svg {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent) 58%, var(--muted));
 }
 
 .member-kind {
-  font-size: 0.68rem;
+  justify-self: end;
+  max-width: min(160px, 28vw);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   color: var(--muted);
-  margin-left: auto;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.member-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.member-panel-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.group-info-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.group-info-trigger:hover,
+.group-info-trigger[aria-expanded="true"] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+
+.group-membership-help {
+  align-items: flex-start;
 }
 
 .review-box {
@@ -2487,6 +2615,26 @@ td small {
   .maintenance-console .resource-row b {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .resource-row.count-row {
+    grid-template-columns: 42px minmax(0, 1fr) max-content;
+  }
+
+  .resource-row.count-row > b {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    justify-self: end;
+  }
+
+  .member-pill {
+    grid-template-columns: 40px minmax(0, 1fr) 22px;
+  }
+
+  .member-kind {
+    grid-column: 2 / -1;
+    justify-self: start;
+    max-width: 100%;
   }
 
   .people-inspector .resource-row {

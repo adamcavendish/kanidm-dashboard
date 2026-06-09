@@ -106,7 +106,11 @@ export function SystemPage() {
           >
             {(entry) => (
               <button
-                class={entry.id === selectedEntry()?.id ? "resource-row active" : "resource-row"}
+                class={
+                  entry.id === selectedEntry()?.id
+                    ? "resource-row count-row active"
+                    : "resource-row count-row"
+                }
                 type="button"
                 onClick={() => setSelectedEntryId(entry.id)}
               >

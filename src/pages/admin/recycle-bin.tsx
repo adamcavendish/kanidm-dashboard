@@ -138,7 +138,11 @@ export function RecycleBinPage() {
           >
             {(entry) => (
               <button
-                class={entry.id === selectedId() ? "resource-row active" : "resource-row"}
+                class={
+                  entry.id === selectedId()
+                    ? "resource-row count-row active"
+                    : "resource-row count-row"
+                }
                 type="button"
                 onClick={() => setSelectedId(entry.id)}
               >
