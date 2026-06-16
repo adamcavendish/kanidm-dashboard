@@ -604,6 +604,10 @@ async function setUserCredentials(page, resetUrl) {
     timeout: 30000,
   });
 
+  const backupSection = page.getByRole("button", { name: /^Backup codes/ });
+  if ((await backupSection.count()) > 0 && (await backupSection.isVisible())) {
+    await backupSection.click();
+  }
   await page.getByRole("button", { name: "Generate backup codes" }).click();
   await page.getByText("Backup codes staged. Store them securely, then commit.").waitFor({
     timeout: 30000,

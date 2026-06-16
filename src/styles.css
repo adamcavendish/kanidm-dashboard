@@ -2195,6 +2195,14 @@ td small {
   width: min(600px, 100%);
 }
 
+.reset-credential-card {
+  width: min(1040px, 100%);
+}
+
+.reset-credential-card .auth-brand p {
+  max-width: 620px;
+}
+
 .auth-brand {
   display: grid;
   gap: 8px;
@@ -2394,6 +2402,124 @@ td small {
 .status-list span,
 .status-list small {
   min-width: 0;
+  color: var(--muted);
+}
+
+.credential-workbench {
+  display: grid;
+  gap: 14px;
+}
+
+.credential-warning-list {
+  align-items: flex-start;
+}
+
+.credential-warning-list > div {
+  display: grid;
+  gap: 10px;
+}
+
+.credential-warning-list p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.credential-warning-list strong {
+  color: color-mix(in srgb, var(--danger) 84%, white);
+}
+
+.credential-warning-list span {
+  color: var(--text);
+}
+
+.credential-section-list {
+  display: grid;
+  gap: 10px;
+}
+
+.credential-section {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 54%, transparent);
+}
+
+.credential-section-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.credential-section-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.credential-section-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.credential-section-toggle strong {
+  color: var(--strong);
+  font-size: 0.96rem;
+}
+
+.credential-section-toggle small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-chevron {
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+
+.section-chevron.open {
+  transform: rotate(180deg);
+}
+
+.credential-section-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.credential-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.credential-commit-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 64%, transparent);
+}
+
+.credential-commit-bar > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.credential-commit-bar span {
   color: var(--muted);
 }
 
@@ -2849,6 +2975,15 @@ td small {
 
   .auth-card {
     padding: 16px;
+  }
+
+  .reset-credential-card {
+    width: 100%;
+  }
+
+  .credential-two-column,
+  .credential-commit-bar {
+    grid-template-columns: 1fr;
   }
 
   .activity-feed > div {

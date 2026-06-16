@@ -22,6 +22,17 @@ async function useMockConfig(page) {
   );
 }
 
+async function expectSectionOpen(page, sectionName, expected) {
+  const expanded = await page
+    .getByRole("button", { name: new RegExp(`^${sectionName}`) })
+    .getAttribute("aria-expanded");
+  if ((expanded === "true") !== expected) {
+    throw new Error(
+      `${sectionName} section expected aria-expanded=${expected}, received ${expanded}`,
+    );
+  }
+}
+
 async function login(page) {
   await page.goto(appUrl("/login"), { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -235,12 +246,40 @@ async function verifyCredentialIntent(page) {
   }
   await page.getByRole("button", { name: "Verify token" }).click();
   await page.getByText("Ava Chen").waitFor();
+  await expectSectionOpen(page, "Password", true);
+  await expectSectionOpen(page, "TOTP", false);
+  await expectSectionOpen(page, "Unix credential", false);
+  const resetCardWidth = await page.locator(".reset-credential-card").evaluate((node) => {
+    return node.getBoundingClientRect().width;
+  });
+  if (resetCardWidth < 900) {
+    throw new Error(`Reset credential card stayed too narrow: ${resetCardWidth}`);
+  }
   await page.getByLabel("New password").fill("mock-updated-password");
   await page.getByLabel("Confirm password").fill("mock-updated-password");
   await page.getByRole("button", { name: "Stage password" }).click();
   await page.getByText("Password staged. Review the credential status, then commit.").waitFor();
-  await page.getByLabel("New Unix password").fill("mock-unix-reset-password");
-  await page.getByLabel("Confirm Unix password").fill("mock-unix-reset-password");
+  await page.getByRole("button", { name: /^Unix credential/ }).click();
+  await page.getByLabel("New Unix credential").fill("mock-unix-reset-password");
+  await page.getByLabel("Confirm Unix credential").fill("mock-unix-reset-password");
+  const unixAttributes = await page.getByLabel("New Unix credential").evaluate((node) => ({
+    autocomplete: node.getAttribute("autocomplete"),
+    lpignore: node.getAttribute("data-lpignore"),
+    onePasswordIgnore: node.getAttribute("data-1p-ignore"),
+    bitwardenIgnore: node.getAttribute("data-bwignore"),
+    name: node.getAttribute("name"),
+  }));
+  if (
+    unixAttributes.autocomplete !== "off" ||
+    unixAttributes.lpignore !== "true" ||
+    unixAttributes.onePasswordIgnore !== "true" ||
+    unixAttributes.bitwardenIgnore !== "true" ||
+    unixAttributes.name !== "kanidm_unix_credential_secret"
+  ) {
+    throw new Error(
+      `Unix credential field did not suppress autofill: ${JSON.stringify(unixAttributes)}`,
+    );
+  }
   await page.getByRole("button", { name: "Stage Unix credential" }).click();
   await page
     .getByText("Unix credential staged. Review the credential status, then commit.")
@@ -249,6 +288,7 @@ async function verifyCredentialIntent(page) {
   await page
     .getByText("Unix credential removal staged. Review the credential status, then commit.")
     .waitFor();
+  await page.getByRole("button", { name: /^Passkeys/ }).click();
   await page.getByRole("button", { name: "Start passkey setup" }).click();
   await page
     .getByText("Passkey setup started. Complete browser registration before commit.")
@@ -263,6 +303,7 @@ async function verifyCredentialIntent(page) {
   await page
     .getByText("Passkey removal staged. Review the credential status, then commit.")
     .waitFor();
+  await page.getByRole("button", { name: /^SSH public keys/ }).click();
   await page.getByLabel("SSH key label").fill("ci-reset-key");
   await page
     .getByLabel("SSH public key", { exact: true })
@@ -276,6 +317,7 @@ async function verifyCredentialIntent(page) {
   await page
     .getByText("SSH public key removal staged. Review the credential status, then commit.")
     .waitFor();
+  await page.getByRole("button", { name: /^Backup codes/ }).click();
   await page.getByRole("button", { name: "Generate backup codes" }).click();
   await page.getByText("Backup codes staged. Store them securely, then commit.").waitFor();
   await page
@@ -286,6 +328,7 @@ async function verifyCredentialIntent(page) {
   await page
     .getByText("Backup code removal staged. Review the credential status, then commit.")
     .waitFor();
+  await page.getByRole("button", { name: /^TOTP/ }).click();
   await page.getByRole("button", { name: "Start TOTP setup" }).click();
   await page
     .getByText("TOTP setup started. Verify the authenticator code before commit.")
@@ -308,6 +351,7 @@ async function verifyCredentialIntent(page) {
   await page.waitForURL("**/enrol");
   await page.getByRole("button", { name: "Start credential update" }).click();
   await page.getByText("Credential update session started.").waitFor();
+  await expectSectionOpen(page, "Password", true);
   await page.getByLabel("New password").fill("mock-self-service-password");
   await page.getByLabel("Confirm password").fill("mock-self-service-password");
   await page.getByRole("button", { name: "Stage password" }).click();
