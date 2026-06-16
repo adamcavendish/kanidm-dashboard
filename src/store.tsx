@@ -1737,7 +1737,7 @@ export function ConsoleProvider(props: ParentProps) {
         shell: "",
         credentialSet: false,
       },
-      lastAuth: "Never",
+      lastAuth: "Unknown",
     };
 
     setState((previous) => ({

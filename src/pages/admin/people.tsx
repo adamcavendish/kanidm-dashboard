@@ -30,7 +30,7 @@ import { CredentialMeter } from "../../components/credential-meter";
 import { StatusBadge } from "../../components/status-badge";
 import { Toolbar } from "../../components/toolbar";
 import { Link } from "../../routing";
-import { formatDateTime, sessionStateLabel, shortId } from "../../utils/format";
+import { formatDateTime, latestSessionLabel, sessionStateLabel, shortId } from "../../utils/format";
 import { labelForGroup } from "../../utils/labels";
 import { searchable } from "../../utils/search";
 
@@ -114,6 +114,11 @@ export function PeoplePage() {
     () => sessions().filter((session) => session.state !== "revoked").length,
   );
   const revokedSessionCount = createMemo(() => sessions().length - activeSessionCount());
+  const latestSession = createMemo(() =>
+    busy() === "sessions" && !sessions().length
+      ? "Loading sessions"
+      : latestSessionLabel(sessions()),
+  );
   let adminRefreshRequest = 0;
 
   function setStatusChoice(nextStatus: UserStatus) {
@@ -521,7 +526,7 @@ export function PeoplePage() {
                     value={<StatusBadge status={person().status} />}
                     variant="detail"
                   />
-                  <KeyValue label="Last auth" value={person().lastAuth} variant="detail" />
+                  <KeyValue label="Latest session" value={latestSession()} variant="detail" />
                 </div>
                 <CredentialMeter person={person()} />
                 <div class="detail-actions">
@@ -551,6 +556,22 @@ export function PeoplePage() {
                     </button>
                   </div>
                 </div>
+                <Show when={intentResult()}>
+                  {(intent) => (
+                    <div class="intent-token person-reset-token">
+                      <h3>Credential update token</h3>
+                      <KeyValue label="Expires" value={formatDateTime(intent().expiryTime)} />
+                      <label>
+                        Reset URL
+                        <input readonly value={resetUrl()} />
+                      </label>
+                      <label>
+                        Token
+                        <textarea readonly rows={3} value={intent().token} />
+                      </label>
+                    </div>
+                  )}
+                </Show>
               </GlassPanel>
 
               <Show when={operationWarnings().length}>
@@ -707,24 +728,6 @@ export function PeoplePage() {
                 </div>
               </GlassPanel>
 
-              <Show when={intentResult()}>
-                {(intent) => (
-                  <GlassPanel title="Credential update token">
-                    <div class="intent-token">
-                      <KeyValue label="Expires" value={formatDateTime(intent().expiryTime)} />
-                      <label>
-                        Reset URL
-                        <input readonly value={resetUrl()} />
-                      </label>
-                      <label>
-                        Token
-                        <textarea readonly rows={3} value={intent().token} />
-                      </label>
-                    </div>
-                  </GlassPanel>
-                )}
-              </Show>
-
               <div class="person-ops-grid">
                 <GlassPanel title="Sessions">
                   <Show
@@ -810,8 +813,13 @@ export function PeoplePage() {
                 </GlassPanel>
 
                 <GlassPanel title="RADIUS">
-                  <KeyValue label="Password" value={radiusPassword() ?? "Not generated"} />
-                  <div class="detail-action-row">
+                  <div class="person-operation-readout">
+                    <span>Password</span>
+                    <strong title={radiusPassword() ?? "Not generated"}>
+                      {radiusPassword() ?? "Not generated"}
+                    </strong>
+                  </div>
+                  <div class="detail-action-row person-operation-actions">
                     <button
                       class="secondary-action"
                       type="button"
@@ -856,7 +864,7 @@ export function PeoplePage() {
                       />
                     </label>
                   </div>
-                  <div class="detail-action-row">
+                  <div class="detail-action-row person-operation-actions">
                     <button
                       class="secondary-action"
                       type="button"

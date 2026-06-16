@@ -1445,7 +1445,7 @@ export class MockDataSource implements DashboardDataSource {
         radiusPassword: false,
       },
       unix: { gidNumber: null, shell: "", credentialSet: false },
-      lastAuth: "Never",
+      lastAuth: "Unknown",
     } as Person;
     this.state = {
       ...this.state,

@@ -2345,6 +2345,16 @@ td small {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.person-reset-token {
+  margin-top: 14px;
+}
+
+.person-reset-token h3 {
+  margin: 0;
+  color: var(--strong);
+  font-size: 0.95rem;
+}
+
 .intent-token input,
 .intent-token textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -2558,6 +2568,38 @@ td small {
   width: 100%;
   min-width: 0;
   white-space: nowrap;
+}
+
+.people-detail .person-operation-actions {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 142px), 1fr));
+}
+
+.people-detail .person-operation-actions > button {
+  min-height: 44px;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.person-operation-readout {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.person-operation-readout span {
+  color: var(--muted);
+  font-weight: 730;
+}
+
+.person-operation-readout strong {
+  min-width: 0;
+  color: var(--strong);
+  font-size: 1.05rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .person-primary-actions > button:last-child {
