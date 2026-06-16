@@ -1,60 +1,27 @@
-import { createEffect, createMemo, createSignal, Show } from "solid-js";
-import QRCode from "qrcode";
-import { CircleAlert, ClipboardCheck } from "lucide-solid";
-import type { CredentialUpdateIntent } from "../domain";
+import { createSignal, Show } from "solid-js";
+import { CircleAlert, ClipboardCheck, KeyRound } from "lucide-solid";
+import type { CredentialUpdateStatus } from "../domain";
 import { useConsole } from "../store";
-import Checklist from "../components/checklist";
+import { CredentialUpdateWorkbench } from "../components/credential-update-workbench";
 import GlassPanel from "../components/glass-panel";
-import KeyValue from "../components/key-value";
 import PageHeader from "../components/page-header";
-import { formatDateTime } from "../utils/format";
+
 export function EnrolPage() {
-  const { currentUser, issueCredentialUpdateIntent } = useConsole();
-  const [intent, setIntent] = createSignal<CredentialUpdateIntent | null>(null);
-  const [qrCodeUrl, setQrCodeUrl] = createSignal("");
+  const { currentUser, beginCredentialUpdate } = useConsole();
+  const [status, setStatus] = createSignal<CredentialUpdateStatus | null>(null);
   const [busy, setBusy] = createSignal(false);
+  const [message, setMessage] = createSignal("");
   const [error, setError] = createSignal("");
-  let qrRenderRequest = 0;
-  const resetUrl = createMemo(() => {
-    const issued = intent();
-    if (!issued) return "";
-    return `${window.location.origin}/reset?token=${encodeURIComponent(issued.token)}`;
-  });
 
-  createEffect(() => {
-    const url = resetUrl();
-    if (!url) {
-      setQrCodeUrl("");
-      return;
-    }
-    const requestId = ++qrRenderRequest;
-    void QRCode.toDataURL(url, {
-      errorCorrectionLevel: "M",
-      margin: 2,
-      scale: 8,
-      color: {
-        dark: "#111827",
-        light: "#ffffff",
-      },
-    })
-      .then((dataUrl) => {
-        if (requestId === qrRenderRequest) setQrCodeUrl(dataUrl);
-      })
-      .catch(() => {
-        if (requestId === qrRenderRequest) {
-          setQrCodeUrl("");
-          setError("Could not render enrolment QR code.");
-        }
-      });
-  });
-
-  async function generateIntent() {
+  async function startUpdate() {
     setBusy(true);
+    setMessage("");
     setError("");
     try {
-      setIntent(await issueCredentialUpdateIntent(currentUser().id, 3600));
+      setStatus(await beginCredentialUpdate(currentUser().id));
+      setMessage("Credential update session started.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate enrolment token.");
+      setError(err instanceof Error ? err.message : "Could not start credential update.");
     } finally {
       setBusy(false);
     }
@@ -62,48 +29,40 @@ export function EnrolPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Self-service" title="Enrol device" />
-      <div class="two-column">
-        <GlassPanel title="Credential update intent">
-          <div class="qr-preview">
-            <Show
-              when={qrCodeUrl()}
-              fallback={<span>Generate an intent to show the enrolment QR code.</span>}
+      <PageHeader eyebrow="Self-service" title="Credential update" />
+      <GlassPanel title="Update credentials">
+        <Show when={!status()}>
+          <div class="field-grid">
+            <p class="muted">
+              Start a short-lived credential update session to update password, passkeys, TOTP, Unix
+              credential, backup codes, or SSH public keys. Staged changes are not applied until you
+              commit.
+            </p>
+            <button
+              class="primary-action"
+              type="button"
+              disabled={busy()}
+              onClick={() => void startUpdate()}
             >
-              {(src) => <img src={src()} alt="Credential update reset URL QR code" />}
-            </Show>
+              <ClipboardCheck size={16} />
+              {busy() ? "Starting update" : "Start credential update"}
+            </button>
           </div>
-          <p class="muted">Scan to continue credential update on another device.</p>
-          <button
-            class="primary-action"
-            type="button"
-            disabled={busy()}
-            onClick={() => void generateIntent()}
-          >
-            <ClipboardCheck size={16} /> {busy() ? "Generating intent" : "Generate intent"}
-          </button>
-          <Show when={intent()}>
-            {(issued) => (
-              <div class="intent-token">
-                <KeyValue label="Expires" value={formatDateTime(issued().expiryTime)} />
-                <label>
-                  Reset URL
-                  <input readonly value={resetUrl()} />
-                </label>
-              </div>
-            )}
-          </Show>
-          <Show when={error()}>
-            <div class="review-box danger">
-              <CircleAlert size={18} />
-              <span>{error()}</span>
-            </div>
-          </Show>
-        </GlassPanel>
-        <GlassPanel title="Allowed updates">
-          <Checklist items={["Password", "Passkey", "Security key", "TOTP", "SSH public key"]} />
-        </GlassPanel>
-      </div>
+        </Show>
+        <Show when={message() && status()}>
+          <div class="review-box success" role="status" aria-live="polite">
+            <KeyRound size={18} />
+            <span>{message()}</span>
+          </div>
+        </Show>
+        <CredentialUpdateWorkbench status={status} setStatus={setStatus} />
+        <Show when={error()}>
+          <div class="review-box danger" role="alert" aria-live="assertive">
+            <CircleAlert size={18} />
+            <span>{error()}</span>
+          </div>
+        </Show>
+      </GlassPanel>
     </>
   );
 }

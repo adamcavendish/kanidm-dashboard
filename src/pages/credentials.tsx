@@ -6,7 +6,6 @@ import {
   Fingerprint,
   KeyRound,
   LaptopMinimal,
-  QrCode,
   RefreshCw,
   RotateCcw,
   ServerCog,
@@ -74,8 +73,7 @@ export function CredentialsPage() {
     logout,
     getUserAuthTokens,
     deleteUserAuthToken,
-    issueCredentialUpdateIntent,
-    exchangeCredentialUpdateIntent,
+    beginCredentialUpdate,
     generateCredentialBackupCodes,
     removeCredentialBackupCodes,
     startCredentialPasskey,
@@ -142,8 +140,7 @@ export function CredentialsPage() {
     setCredentialError("");
     setCredentialSelfServiceDenied(false);
     try {
-      const intent = await issueCredentialUpdateIntent(currentUser().id, 3600);
-      const nextStatus = await exchangeCredentialUpdateIntent(intent.token);
+      const nextStatus = await beginCredentialUpdate(currentUser().id);
       setCredentialStatus(nextStatus);
       syncCredentialControls(nextStatus);
       setCredentialMessage(message);
@@ -360,7 +357,7 @@ export function CredentialsPage() {
         title="Credentials"
         action={
           <Link class="secondary-action" href="/enrol">
-            <QrCode size={16} /> Enrol device
+            <KeyRound size={16} /> Update credentials
           </Link>
         }
       />

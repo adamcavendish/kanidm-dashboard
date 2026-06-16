@@ -510,7 +510,8 @@ email }`; unit coverage verifies the endpoint, bearer auth, and request
     `{ "sshpublickeyremove": label }`. The raw OpenSSH string form was verified
     against local Kanidm 1.10.3; object payloads fail deserialization.
   - `/reset` can cancel a verified credential update session.
-  - Self-service `/enrol` can generate an intent URL for the current user in mock mode.
+  - Self-service `/enrol` starts the current-user credential update path and
+    can stage a primary-password update in mock mode.
   - Self-service `/credentials` starts the current-user credential update path for passkey
     and backup-code management. Mock e2e stages passkey and backup-code updates through the
     credential update state machine; live e2e accepts either a started session or Kanidm's
@@ -666,8 +667,9 @@ Screenshots from the latest local browser verification:
   Kanidm passkey login with a Playwright virtual authenticator.
 - `/credentials` now exposes passkey management and backup-code regeneration
   through credential update sessions. Local live Kanidm 1.10.3 denies
-  `idm_admin` current-user intent creation with `500 "notauthorised"`, and the
-  dashboard surfaces that as a self-service policy denial while staying on the
+  some current-user credential update requests with `500 "notauthorised"` or
+  `403 "accessdenied"`, and the dashboard surfaces that as a self-service
+  policy denial while staying on the
   portal credentials page.
 - Password-plus-security-key login is wired to Kanidm stepped auth with
   security-key assertion first and password second. Unit tests cover the payloads,

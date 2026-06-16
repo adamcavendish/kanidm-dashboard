@@ -753,13 +753,10 @@ async function verifyCredentialSelfService(page) {
     throw new Error("Admin rail rendered on non-admin credential self-service.");
   }
 
-  const updateIntentPath = `/v1/person/${encodeURIComponent(
-    personName,
-  )}/_credential/_update_intent/`;
-  const updateIntentResponse = page
+  const updatePath = `/v1/person/${encodeURIComponent(personName)}/_credential/_update`;
+  const updateResponse = page
     .waitForResponse(
-      (response) =>
-        response.request().method() === "GET" && response.url().includes(updateIntentPath),
+      (response) => response.request().method() === "GET" && response.url().includes(updatePath),
       { timeout: 30000 },
     )
     .catch(() => null);
@@ -780,19 +777,19 @@ async function verifyCredentialSelfService(page) {
     )
     .then((handle) => handle.jsonValue());
 
-  const intentResponse = await updateIntentResponse;
-  if (!intentResponse) {
-    throw new Error("Credential self-service did not request a Kanidm update intent.");
+  const beginResponse = await updateResponse;
+  if (!beginResponse) {
+    throw new Error("Credential self-service did not request a Kanidm update session.");
   }
 
   if (outcome === "denied") {
-    const body = await responseTextWithTimeout(intentResponse);
-    if (!isCredentialSelfServiceDenial(intentResponse.status(), body)) {
+    const body = await responseTextWithTimeout(beginResponse);
+    if (!isCredentialSelfServiceDenial(beginResponse.status(), body)) {
       throw new Error(
-        `Credential self-service showed a denial for HTTP ${intentResponse.status()}: ${body}`,
+        `Credential self-service showed a denial for HTTP ${beginResponse.status()}: ${body}`,
       );
     }
-    expectedLivePolicyFailures.add(`${intentResponse.status()} ${intentResponse.url()}`);
+    expectedLivePolicyFailures.add(`${beginResponse.status()} ${beginResponse.url()}`);
     return {
       credentialSelfServiceVerified: false,
       credentialSelfServicePolicyDenied: true,
@@ -800,9 +797,9 @@ async function verifyCredentialSelfService(page) {
     };
   }
 
-  if (!intentResponse.ok()) {
+  if (!beginResponse.ok()) {
     throw new Error(
-      `Credential self-service update intent returned HTTP ${intentResponse.status()}.`,
+      `Credential self-service update session returned HTTP ${beginResponse.status()}.`,
     );
   }
 
