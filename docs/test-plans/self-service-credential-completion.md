@@ -10,8 +10,8 @@ commit or cancel the staged update without entering admin routes.
 
 ## Kanidm API Coverage
 
-- Current-user intent creation uses the existing person credential update intent
-  operation, then exchanges the intent through `/v1/credential/_exchange_intent`.
+- Current-user self-service starts a direct credential update session with
+  `GET /v1/person/{id}/_credential/_update`.
 - Passkey setup uses `/v1/credential/_update` with `passkeyinit` followed by
   `{ "passkeyfinish": [label, registration] }`.
 - Attested passkey setup uses `attestedpasskeyinit` followed by
@@ -50,18 +50,20 @@ commit or cancel the staged update without entering admin routes.
 
 ## Current Notes
 
-- The reset-token page remains the broad credential update workbench for
+- The reset-token page remains the unauthenticated entry for admin-issued
   password, TOTP, Unix, SSH, passkey, and backup-code operations.
-- `/credentials` intentionally exposes only passkey and backup-code completion
-  controls for this phase.
-- If live Kanidm denies current-user intent creation for a specific account, the
-  UI must show the returned error and keep the user on `/credentials`.
+- `/enrol` is the authenticated self-service credential update workbench for the
+  current user.
+- `/credentials` exposes inline passkey and backup-code shortcuts that start the
+  same direct current-user credential update session.
+- If live Kanidm denies direct current-user credential update for a specific
+  account, the UI must show the returned error and keep the user on
+  `/credentials` or `/enrol`.
 - Local live probing on Kanidm 1.10.3 showed `idm_admin` receives
-  `500 "notauthorised"` for
-  `/v1/person/idm_admin/_credential/_update_intent/3600`; the dashboard maps
+  `500 "notauthorised"` for credential self-service; the dashboard maps
   that to a self-service denial message instead of the generated SDK's generic
   error.
 - Live e2e also allows `403` on a non-admin user's
-  `/_credential/_update_intent` request as a Kanidm policy denial, scoped to
-  that exact self-service request. This is reported as
+  `/_credential/_update` request as a Kanidm policy denial, scoped to that
+  exact self-service request. This is reported as
   `credentialSelfServicePolicyDenied`, not as a completed update session.

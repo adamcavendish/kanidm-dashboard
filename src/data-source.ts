@@ -143,6 +143,7 @@ export interface DashboardDataSource {
   deleteUnixCredential(id: string): Promise<void>;
   credentialUpdateIntent(id: string, ttl: number): Promise<CredentialUpdateIntent>;
   sendCredentialUpdateIntent(id: string, ttl: number, email: string): Promise<void>;
+  beginCredentialUpdate(id: string): Promise<CredentialUpdateStatus>;
   exchangeCredentialUpdateIntent(token: string): Promise<string>;
   credentialUpdateStatus(token: string): Promise<CredentialUpdateStatus>;
   credentialUpdate(sessionToken: string, body: unknown): Promise<CredentialUpdateStatus>;
@@ -928,6 +929,25 @@ export class KanidmDataSource implements DashboardDataSource {
       id,
       body: { ttl, email },
     });
+  }
+
+  async beginCredentialUpdate(id: string): Promise<CredentialUpdateStatus> {
+    const path = `/v1/person/${encodeURIComponent(id)}/_credential/_update`;
+    const res = await fetch(`${this.config.basePath}${path}`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(this.bearerToken ? { Authorization: `Bearer ${this.bearerToken}` } : {}),
+      },
+    });
+    if (!res.ok) throw await kanidmHttpError(path, res);
+    const body = (await res.json()) as [{ token?: string }, unknown];
+    const sessionToken = body[0]?.token;
+    if (!sessionToken) {
+      throw new Error("Credential update begin response was missing a session token.");
+    }
+    return mapCredentialUpdateStatus(sessionToken, body[1] as never);
   }
 
   async exchangeCredentialUpdateIntent(token: string): Promise<string> {
@@ -2108,6 +2128,11 @@ export class MockDataSource implements DashboardDataSource {
     };
   }
   async sendCredentialUpdateIntent(_id: string, _ttl: number, _email: string): Promise<void> {}
+  async beginCredentialUpdate(id: string): Promise<CredentialUpdateStatus> {
+    const person =
+      this.state.people.find((candidate) => candidate.id === id) ?? this.state.people[0];
+    return this.mockStatus(`cu_demo_self_${person.username}`, person);
+  }
   async exchangeCredentialUpdateIntent(_token: string): Promise<string> {
     return `cu_demo_${_token.slice(-12)}`;
   }

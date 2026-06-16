@@ -304,14 +304,14 @@ async function verifyCredentialIntent(page) {
 
   await login(page);
   await openCredentials(page);
-  await page.getByRole("link", { name: "Enrol device" }).click();
+  await page.getByRole("link", { name: "Update credentials" }).click();
   await page.waitForURL("**/enrol");
-  await page.getByRole("button", { name: "Generate intent" }).click();
-  await page.getByLabel("Reset URL").waitFor();
-  const enrolUrl = await page.getByLabel("Reset URL").inputValue();
-  if (!enrolUrl.includes("kc_demo_")) {
-    throw new Error("Self-service enrol did not generate a mock credential intent URL.");
-  }
+  await page.getByRole("button", { name: "Start credential update" }).click();
+  await page.getByText("Credential update session started.").waitFor();
+  await page.getByLabel("New password").fill("mock-self-service-password");
+  await page.getByLabel("Confirm password").fill("mock-self-service-password");
+  await page.getByRole("button", { name: "Stage password" }).click();
+  await page.getByText("Password staged. Review the credential status, then commit.").waitFor();
 }
 
 async function verifySelfServiceCredentialCompletion(page) {

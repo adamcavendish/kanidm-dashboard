@@ -152,6 +152,7 @@ interface ConsoleContextValue {
   ) => Promise<UnixAccountSettings>;
   setPersonUnixCredential: (personId: string, password: string) => Promise<UnixAccountSettings>;
   deletePersonUnixCredential: (personId: string) => Promise<UnixAccountSettings>;
+  beginCredentialUpdate: (personId: string) => Promise<CredentialUpdateStatus>;
   exchangeCredentialUpdateIntent: (intentToken: string) => Promise<CredentialUpdateStatus>;
   updateCredentialPassword: (
     sessionToken: string,
@@ -1296,6 +1297,20 @@ export function ConsoleProvider(props: ParentProps) {
     }
 
     return mockCredentialUpdateStatus(`cu_demo_${trimmed.slice(-12)}`, currentUser());
+  };
+
+  const beginCredentialUpdate = async (personId: string) => {
+    const person = state().people.find((candidate) => candidate.id === personId);
+    if (!person) throw new Error("Person was not found.");
+
+    if (config().dataSource.mode === "kanidm") {
+      return new KanidmDataSource(
+        config().dataSource,
+        sessionStorage.getItem(bearerTokenKey) ?? undefined,
+      ).beginCredentialUpdate(kanidmPersonId(personId));
+    }
+
+    return mockCredentialUpdateStatus(`cu_demo_self_${person.username}`, person);
   };
 
   // Shared factory: avoids repeating KanidmDataSource construction ~16 times
@@ -2917,6 +2932,7 @@ export function ConsoleProvider(props: ParentProps) {
     extendPersonUnixAccount,
     setPersonUnixCredential,
     deletePersonUnixCredential,
+    beginCredentialUpdate,
     exchangeCredentialUpdateIntent,
     updateCredentialPassword,
     generateCredentialBackupCodes,

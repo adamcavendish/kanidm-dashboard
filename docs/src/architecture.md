@@ -66,10 +66,13 @@ The dashboard implements this state machine in `kanidm-auth.ts`:
 
 ## Credential update state machine
 
-The credential update wizard (`src/pages/reset-credentials.tsx`) uses Kanidm's
-multi-step credential protocol:
+The credential update wizard (`src/pages/reset-credentials.tsx`) and
+self-service update page (`src/pages/enrol.tsx`) use Kanidm's multi-step
+credential protocol:
 
-1. `_exchange_intent` — exchange a reset token for a session
+1. `_exchange_intent` — exchange an admin-issued reset token for a session, or
+   `/v1/person/{id}/_credential/_update` — begin an authenticated self-service
+   session
 2. `_status` — query current credential state
 3. `_update` — stage credential changes (password, TOTP, passkeys, etc.)
 4. `_commit` — commit all staged changes atomically
