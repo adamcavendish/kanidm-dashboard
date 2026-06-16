@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 import { CircleAlert } from "lucide-solid";
 import type { CredentialUpdateStatus } from "../domain";
 import KeyValue from "./key-value";
+import { credentialWarningMessage } from "../utils/credential-warnings";
 
 export function CredentialUpdateStatusPanel(props: { status: CredentialUpdateStatus }) {
   const rows = () => [
@@ -44,9 +45,18 @@ export function CredentialUpdateStatusPanel(props: { status: CredentialUpdateSta
       <KeyValue label="SPN" value={props.status.spn} />
       <KeyValue label="Commit allowed" value={props.status.canCommit ? "Yes" : "No"} />
       <Show when={props.status.warnings.length}>
-        <div class="review-box danger" role="alert" aria-live="assertive">
+        <div class="review-box danger credential-warning-list" role="alert" aria-live="assertive">
           <CircleAlert size={18} />
-          <span>{props.status.warnings.join(", ")}</span>
+          <div>
+            <For each={props.status.warnings}>
+              {(warning) => (
+                <p>
+                  <strong>{warning}</strong>
+                  <span>{credentialWarningMessage(warning)}</span>
+                </p>
+              )}
+            </For>
+          </div>
         </div>
       </Show>
       <div class="status-list">

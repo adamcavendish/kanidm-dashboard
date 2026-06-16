@@ -1,6 +1,15 @@
-import { createEffect, createSignal, For, Show, type Accessor, type Setter } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  Show,
+  type Accessor,
+  type JSX,
+  type Setter,
+} from "solid-js";
 import {
   BadgeCheck,
+  ChevronDown,
   CircleAlert,
   ClipboardCheck,
   Fingerprint,
@@ -21,11 +30,37 @@ import {
   mockPasskeyRegistration,
   passkeyRegistrationHint,
 } from "../utils/webauthn";
+import { warningsRequirePasskey, warningsRequireTotp } from "../utils/credential-warnings";
 
 interface CredentialUpdateWorkbenchProps {
   status: Accessor<CredentialUpdateStatus | null>;
   setStatus: Setter<CredentialUpdateStatus | null>;
   messageResetKey?: Accessor<unknown>;
+}
+
+type SectionId = "password" | "passkeys" | "totp" | "unix" | "ssh" | "backup";
+
+const closedSections: Record<SectionId, boolean> = {
+  password: false,
+  passkeys: false,
+  totp: false,
+  unix: false,
+  ssh: false,
+  backup: false,
+};
+
+function defaultSections(status: CredentialUpdateStatus): Record<SectionId, boolean> {
+  return {
+    password: true,
+    passkeys: warningsRequirePasskey(status.warnings) || Boolean(status.pendingPasskey),
+    totp:
+      warningsRequireTotp(status.warnings) ||
+      Boolean(status.pendingTotp) ||
+      Boolean(status.totpIssue),
+    unix: false,
+    ssh: false,
+    backup: status.pendingBackupCodes.length > 0,
+  };
 }
 
 export function CredentialUpdateWorkbench(props: CredentialUpdateWorkbenchProps) {
@@ -66,14 +101,40 @@ export function CredentialUpdateWorkbench(props: CredentialUpdateWorkbenchProps)
   const [busy, setBusy] = createSignal("");
   const [message, setMessage] = createSignal("");
   const [error, setError] = createSignal("");
+  const [openSections, setOpenSections] = createSignal<Record<SectionId, boolean>>({
+    ...closedSections,
+  });
+  const [lastSessionToken, setLastSessionToken] = createSignal("");
 
   createEffect(() => {
     const current = props.status();
-    if (!current) return;
+    if (!current) {
+      setLastSessionToken("");
+      setOpenSections({ ...closedSections });
+      return;
+    }
     setPasskeyRemoveId(current.passkeys[0]?.uuid ?? "");
     setAttestedPasskeyRemoveId(current.attestedPasskeys[0]?.uuid ?? "");
     setSshKeyRemoveLabel(current.sshKeyLabels[0] ?? "");
     setTotpRemoveLabel(current.totpLabels[0] ?? "");
+    if (current.sessionToken !== lastSessionToken()) {
+      setLastSessionToken(current.sessionToken);
+      setOpenSections(defaultSections(current));
+      return;
+    }
+    setOpenSections((previous) => ({
+      ...previous,
+      passkeys:
+        previous.passkeys ||
+        warningsRequirePasskey(current.warnings) ||
+        Boolean(current.pendingPasskey),
+      totp:
+        previous.totp ||
+        warningsRequireTotp(current.warnings) ||
+        Boolean(current.pendingTotp) ||
+        Boolean(current.totpIssue),
+      backup: previous.backup || current.pendingBackupCodes.length > 0,
+    }));
   });
 
   createEffect(() => {
@@ -85,6 +146,45 @@ export function CredentialUpdateWorkbench(props: CredentialUpdateWorkbenchProps)
 
   function setNextStatus(nextStatus: CredentialUpdateStatus) {
     props.setStatus(nextStatus);
+  }
+
+  function toggleSection(section: SectionId) {
+    setOpenSections((previous) => ({ ...previous, [section]: !previous[section] }));
+  }
+
+  function sectionPanelId(section: SectionId) {
+    return `credential-section-${section}`;
+  }
+
+  function WorkbenchSection(sectionProps: {
+    id: SectionId;
+    title: string;
+    summary: string;
+    children: JSX.Element;
+  }) {
+    const expanded = () => openSections()[sectionProps.id];
+    return (
+      <section class="credential-section">
+        <button
+          class="credential-section-toggle"
+          type="button"
+          aria-expanded={expanded()}
+          aria-controls={sectionPanelId(sectionProps.id)}
+          onClick={() => toggleSection(sectionProps.id)}
+        >
+          <span>
+            <strong>{sectionProps.title}</strong>
+            <small>{sectionProps.summary}</small>
+          </span>
+          <ChevronDown class={expanded() ? "section-chevron open" : "section-chevron"} size={18} />
+        </button>
+        <Show when={expanded()}>
+          <div id={sectionPanelId(sectionProps.id)} class="credential-section-body">
+            {sectionProps.children}
+          </div>
+        </Show>
+      </section>
+    );
   }
 
   async function stagePassword() {
@@ -468,428 +568,504 @@ export function CredentialUpdateWorkbench(props: CredentialUpdateWorkbenchProps)
   return (
     <>
       <Show when={props.status()}>
-        {(verified) => <CredentialUpdateStatusPanel status={verified()} />}
-      </Show>
-      <Show when={props.status()}>
-        <div class="field-grid">
-          <label>
-            New password
-            <input
-              type="password"
-              value={newPassword()}
-              autocomplete="new-password"
-              onInput={(event) => setNewPassword(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Confirm password
-            <input
-              type="password"
-              value={confirmPassword()}
-              autocomplete="new-password"
-              onInput={(event) => setConfirmPassword(event.currentTarget.value)}
-            />
-          </label>
-          <button
-            class="secondary-action"
-            type="button"
-            disabled={busy() === "password" || !newPassword().trim() || !confirmPassword().trim()}
-            onClick={() => void stagePassword()}
-          >
-            <KeyRound size={16} /> {busy() === "password" ? "Staging password" : "Stage password"}
-          </button>
-        </div>
-      </Show>
-      <Show when={props.status()}>
-        <div class="field-grid">
-          <label>
-            New Unix password
-            <input
-              type="password"
-              value={unixPassword()}
-              autocomplete="new-password"
-              onInput={(event) => setUnixPassword(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Confirm Unix password
-            <input
-              type="password"
-              value={unixConfirmPassword()}
-              autocomplete="new-password"
-              onInput={(event) => setUnixConfirmPassword(event.currentTarget.value)}
-            />
-          </label>
-          <div class="button-row">
-            <button
-              class="secondary-action"
-              type="button"
-              disabled={
-                busy() === "unix-password" ||
-                !unixPassword().trim() ||
-                !unixConfirmPassword().trim()
-              }
-              onClick={() => void stageUnixPassword()}
-            >
-              <ServerCog size={16} />
-              {busy() === "unix-password" ? "Staging Unix credential" : "Stage Unix credential"}
-            </button>
-            <button
-              class="danger-action"
-              type="button"
-              disabled={busy() === "unix-remove"}
-              onClick={() => void removeUnixPassword()}
-            >
-              <Trash2 size={16} />
-              {busy() === "unix-remove" ? "Removing Unix credential" : "Remove Unix credential"}
-            </button>
-          </div>
-        </div>
-      </Show>
-      <Show when={props.status()}>
         {(verified) => (
-          <div class="field-grid">
-            <Show when={verified().passkeys.length}>
-              <label>
-                Passkey
-                <select
-                  aria-label="Passkey"
-                  value={passkeyRemoveId()}
-                  onChange={(event) => setPasskeyRemoveId(event.currentTarget.value)}
+          <div class="credential-workbench">
+            <CredentialUpdateStatusPanel status={verified()} />
+
+            <div class="credential-section-list">
+              <WorkbenchSection
+                id="password"
+                title="Password"
+                summary={`${verified().primaryState} · ${
+                  verified().hasPrimaryCredential ? "Present" : "Missing"
+                }`}
+              >
+                <div class="field-grid credential-two-column">
+                  <label>
+                    New password
+                    <input
+                      type="password"
+                      value={newPassword()}
+                      autocomplete="new-password"
+                      onInput={(event) => setNewPassword(event.currentTarget.value)}
+                    />
+                  </label>
+                  <label>
+                    Confirm password
+                    <input
+                      type="password"
+                      value={confirmPassword()}
+                      autocomplete="new-password"
+                      onInput={(event) => setConfirmPassword(event.currentTarget.value)}
+                    />
+                  </label>
+                </div>
+                <button
+                  class="secondary-action"
+                  type="button"
+                  disabled={
+                    busy() === "password" || !newPassword().trim() || !confirmPassword().trim()
+                  }
+                  onClick={() => void stagePassword()}
                 >
-                  <option value="">Select passkey</option>
-                  <For each={verified().passkeys}>
-                    {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
-                  </For>
-                </select>
-              </label>
-            </Show>
-            <Show when={verified().attestedPasskeys.length}>
-              <label>
-                Attested passkey
-                <select
-                  aria-label="Attested passkey"
-                  value={attestedPasskeyRemoveId()}
-                  onChange={(event) => setAttestedPasskeyRemoveId(event.currentTarget.value)}
-                >
-                  <option value="">Select attested passkey</option>
-                  <For each={verified().attestedPasskeys}>
-                    {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
-                  </For>
-                </select>
-              </label>
-            </Show>
-            <label>
-              Passkey label
-              <input
-                value={passkeyLabel()}
-                onInput={(event) => setPasskeyLabel(event.currentTarget.value)}
-              />
-            </label>
-            <div class="review-box">
-              <Fingerprint size={18} />
-              <span>{passkeyRegistrationHint(verified().pendingPasskey)}</span>
-            </div>
-            <div class="button-row">
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "passkey-start" ||
-                  Boolean(verified().pendingPasskey || verified().pendingTotp)
+                  <KeyRound size={16} />{" "}
+                  {busy() === "password" ? "Staging password" : "Stage password"}
+                </button>
+              </WorkbenchSection>
+
+              <WorkbenchSection
+                id="passkeys"
+                title="Passkeys"
+                summary={`${verified().passkeyCount} regular · ${
+                  verified().attestedPasskeyCount
+                } attested`}
+              >
+                <div class="field-grid">
+                  <div class="credential-two-column">
+                    <Show when={verified().passkeys.length}>
+                      <label>
+                        Passkey
+                        <select
+                          aria-label="Passkey"
+                          value={passkeyRemoveId()}
+                          onChange={(event) => setPasskeyRemoveId(event.currentTarget.value)}
+                        >
+                          <option value="">Select passkey</option>
+                          <For each={verified().passkeys}>
+                            {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
+                          </For>
+                        </select>
+                      </label>
+                    </Show>
+                    <Show when={verified().attestedPasskeys.length}>
+                      <label>
+                        Attested passkey
+                        <select
+                          aria-label="Attested passkey"
+                          value={attestedPasskeyRemoveId()}
+                          onChange={(event) =>
+                            setAttestedPasskeyRemoveId(event.currentTarget.value)
+                          }
+                        >
+                          <option value="">Select attested passkey</option>
+                          <For each={verified().attestedPasskeys}>
+                            {(passkey) => <option value={passkey.uuid}>{passkey.tag}</option>}
+                          </For>
+                        </select>
+                      </label>
+                    </Show>
+                  </div>
+                  <label>
+                    Passkey label
+                    <input
+                      value={passkeyLabel()}
+                      onInput={(event) => setPasskeyLabel(event.currentTarget.value)}
+                    />
+                  </label>
+                  <div class="review-box">
+                    <Fingerprint size={18} />
+                    <span>{passkeyRegistrationHint(verified().pendingPasskey)}</span>
+                  </div>
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "passkey-start" ||
+                        Boolean(verified().pendingPasskey || verified().pendingTotp)
+                      }
+                      onClick={() => void startPasskey("passkey")}
+                    >
+                      <Fingerprint size={16} />
+                      {busy() === "passkey-start" ? "Starting passkey" : "Start passkey setup"}
+                    </button>
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "attested-passkey-start" ||
+                        Boolean(verified().pendingPasskey || verified().pendingTotp)
+                      }
+                      onClick={() => void startPasskey("attested-passkey")}
+                    >
+                      <Fingerprint size={16} />
+                      {busy() === "attested-passkey-start"
+                        ? "Starting attested passkey"
+                        : "Start attested passkey setup"}
+                    </button>
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "passkey-finish" ||
+                        !verified().pendingPasskey ||
+                        !passkeyLabel().trim()
+                      }
+                      onClick={() => void finishPasskeyRegistration()}
+                    >
+                      <ShieldCheck size={16} />
+                      {busy() === "passkey-finish"
+                        ? "Registering passkey"
+                        : verified().pendingPasskey?.kind === "attested-passkey"
+                          ? "Register attested passkey"
+                          : "Register passkey"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={
+                        busy() === "passkey-remove" ||
+                        !verified().passkeys.length ||
+                        !passkeyRemoveId().trim()
+                      }
+                      onClick={() => void removePasskey()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "passkey-remove" ? "Removing passkey" : "Remove passkey"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={
+                        busy() === "attested-passkey-remove" ||
+                        !verified().attestedPasskeys.length ||
+                        !attestedPasskeyRemoveId().trim()
+                      }
+                      onClick={() => void removeAttestedPasskey()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "attested-passkey-remove"
+                        ? "Removing attested passkey"
+                        : "Remove attested passkey"}
+                    </button>
+                  </div>
+                </div>
+              </WorkbenchSection>
+
+              <WorkbenchSection
+                id="totp"
+                title="TOTP"
+                summary={
+                  verified().pendingTotp
+                    ? "Pending verification"
+                    : verified().totpLabels.length
+                      ? `${verified().totpLabels.length} registered`
+                      : "None registered"
                 }
-                onClick={() => void startPasskey("passkey")}
               >
-                <Fingerprint size={16} />
-                {busy() === "passkey-start" ? "Starting passkey" : "Start passkey setup"}
-              </button>
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "attested-passkey-start" ||
-                  Boolean(verified().pendingPasskey || verified().pendingTotp)
-                }
-                onClick={() => void startPasskey("attested-passkey")}
-              >
-                <Fingerprint size={16} />
-                {busy() === "attested-passkey-start"
-                  ? "Starting attested passkey"
-                  : "Start attested passkey setup"}
-              </button>
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "passkey-finish" ||
-                  !verified().pendingPasskey ||
-                  !passkeyLabel().trim()
-                }
-                onClick={() => void finishPasskeyRegistration()}
-              >
-                <ShieldCheck size={16} />
-                {busy() === "passkey-finish"
-                  ? "Registering passkey"
-                  : verified().pendingPasskey?.kind === "attested-passkey"
-                    ? "Register attested passkey"
-                    : "Register passkey"}
-              </button>
-              <button
-                class="danger-action"
-                type="button"
-                disabled={
-                  busy() === "passkey-remove" ||
-                  !verified().passkeys.length ||
-                  !passkeyRemoveId().trim()
-                }
-                onClick={() => void removePasskey()}
-              >
-                <Trash2 size={16} />
-                {busy() === "passkey-remove" ? "Removing passkey" : "Remove passkey"}
-              </button>
-              <button
-                class="danger-action"
-                type="button"
-                disabled={
-                  busy() === "attested-passkey-remove" ||
-                  !verified().attestedPasskeys.length ||
-                  !attestedPasskeyRemoveId().trim()
-                }
-                onClick={() => void removeAttestedPasskey()}
-              >
-                <Trash2 size={16} />
-                {busy() === "attested-passkey-remove"
-                  ? "Removing attested passkey"
-                  : "Remove attested passkey"}
-              </button>
-            </div>
-          </div>
-        )}
-      </Show>
-      <Show when={props.status()}>
-        {(verified) => (
-          <div class="field-grid">
-            <label>
-              SSH key label
-              <input
-                value={sshKeyLabel()}
-                onInput={(event) => setSshKeyLabel(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              SSH public key
-              <textarea
-                rows={3}
-                value={sshPublicKey()}
-                onInput={(event) => setSshPublicKey(event.currentTarget.value)}
-                placeholder="ssh-ed25519 AAAA..."
-              />
-            </label>
-            <Show when={verified().sshKeyLabels.length}>
-              <label>
-                Registered SSH public key
-                <select
-                  value={sshKeyRemoveLabel()}
-                  onChange={(event) => setSshKeyRemoveLabel(event.currentTarget.value)}
-                >
-                  <option value="">Select SSH key</option>
-                  <For each={verified().sshKeyLabels}>
-                    {(label) => <option value={label}>{label}</option>}
-                  </For>
-                </select>
-              </label>
-            </Show>
-            <div class="review-box">
-              <CircleAlert size={18} />
-              <span>
-                SSH public keys are parsed by Kanidm before staging. Commit only after reviewing the
-                resulting key count and labels.
-              </span>
-            </div>
-            <div class="button-row">
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "ssh-key-add" || !sshKeyLabel().trim() || !sshPublicKey().trim()
-                }
-                onClick={() => void addSshKey()}
-              >
-                <KeyRound size={16} />
-                {busy() === "ssh-key-add" ? "Adding SSH key" : "Add SSH key"}
-              </button>
-              <button
-                class="danger-action"
-                type="button"
-                disabled={
-                  busy() === "ssh-key-remove" ||
-                  !verified().sshKeyLabels.length ||
-                  !sshKeyRemoveLabel().trim()
-                }
-                onClick={() => void removeSshPublicKey()}
-              >
-                <Trash2 size={16} />
-                {busy() === "ssh-key-remove" ? "Removing SSH key" : "Remove SSH key"}
-              </button>
-            </div>
-          </div>
-        )}
-      </Show>
-      <Show when={props.status()}>
-        {(verified) => (
-          <div class="field-grid">
-            <div class="button-row">
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={busy() === "backup-codes"}
-                onClick={() => void generateBackupCodes()}
-              >
-                <SquareAsterisk size={16} />
-                {busy() === "backup-codes" ? "Generating codes" : "Generate backup codes"}
-              </button>
-              <button
-                class="danger-action"
-                type="button"
-                disabled={busy() === "backup-code-remove"}
-                onClick={() => void removeBackupCodes()}
-              >
-                <Trash2 size={16} />
-                {busy() === "backup-code-remove" ? "Removing codes" : "Remove backup codes"}
-              </button>
-            </div>
-            <Show when={verified().pendingBackupCodes.length}>
-              <div class="code-grid" aria-label="Generated backup codes">
-                <For each={verified().pendingBackupCodes}>{(code) => <code>{code}</code>}</For>
-              </div>
-            </Show>
-          </div>
-        )}
-      </Show>
-      <Show when={props.status()}>
-        {(verified) => (
-          <div class="field-grid">
-            <div class="button-row">
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={busy() === "totp-start" || Boolean(verified().pendingPasskey)}
-                onClick={() => void startTotp()}
-              >
-                <QrCode size={16} />
-                {busy() === "totp-start" ? "Starting TOTP" : "Start TOTP setup"}
-              </button>
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "mfa-cancel" || !(verified().pendingTotp || verified().pendingPasskey)
-                }
-                onClick={() => void cancelMfaRegistration()}
-              >
-                <Trash2 size={16} />
-                {busy() === "mfa-cancel" ? "Cancelling setup" : "Cancel MFA setup"}
-              </button>
-            </div>
-            <Show when={verified().pendingTotp}>
-              {(totp) => <TotpRegistrationPanel registration={totp()} />}
-            </Show>
-            <Show when={verified().totpIssue}>
-              <div class="review-box danger">
-                <CircleAlert size={18} />
-                <span>{totpIssueText(verified())}</span>
-                <Show when={verified().totpIssue === "invalid-sha1"}>
+                <div class="field-grid">
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={busy() === "totp-start" || Boolean(verified().pendingPasskey)}
+                      onClick={() => void startTotp()}
+                    >
+                      <QrCode size={16} />
+                      {busy() === "totp-start" ? "Starting TOTP" : "Start TOTP setup"}
+                    </button>
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "mfa-cancel" ||
+                        !(verified().pendingTotp || verified().pendingPasskey)
+                      }
+                      onClick={() => void cancelMfaRegistration()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "mfa-cancel" ? "Cancelling setup" : "Cancel MFA setup"}
+                    </button>
+                  </div>
+                  <Show when={verified().pendingTotp}>
+                    {(totp) => <TotpRegistrationPanel registration={totp()} />}
+                  </Show>
+                  <Show when={verified().totpIssue}>
+                    <div class="review-box danger">
+                      <CircleAlert size={18} />
+                      <span>{totpIssueText(verified())}</span>
+                      <Show when={verified().totpIssue === "invalid-sha1"}>
+                        <button
+                          class="secondary-action"
+                          type="button"
+                          disabled={busy() === "totp-sha1"}
+                          onClick={() => void acceptTotpSha1()}
+                        >
+                          {busy() === "totp-sha1" ? "Accepting" : "Accept SHA1"}
+                        </button>
+                      </Show>
+                    </div>
+                  </Show>
+                  <div class="field-grid credential-two-column">
+                    <label>
+                      Authenticator label
+                      <input
+                        value={totpLabel()}
+                        onInput={(event) => setTotpLabel(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      TOTP code
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={totpCode()}
+                        onInput={(event) => setTotpCode(event.currentTarget.value)}
+                        placeholder="123456"
+                      />
+                    </label>
+                  </div>
                   <button
                     class="secondary-action"
                     type="button"
-                    disabled={busy() === "totp-sha1"}
-                    onClick={() => void acceptTotpSha1()}
+                    disabled={
+                      busy() === "totp-verify" ||
+                      !verified().pendingTotp ||
+                      !totpLabel().trim() ||
+                      !totpCode().trim()
+                    }
+                    onClick={() => void verifyTotp()}
                   >
-                    {busy() === "totp-sha1" ? "Accepting" : "Accept SHA1"}
+                    <ShieldCheck size={16} />
+                    {busy() === "totp-verify" ? "Verifying TOTP" : "Verify TOTP"}
                   </button>
-                </Show>
-              </div>
-            </Show>
-            <div class="field-grid">
-              <label>
-                Authenticator label
-                <input
-                  value={totpLabel()}
-                  onInput={(event) => setTotpLabel(event.currentTarget.value)}
-                />
-              </label>
-              <label>
-                TOTP code
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={totpCode()}
-                  onInput={(event) => setTotpCode(event.currentTarget.value)}
-                  placeholder="123456"
-                />
-              </label>
-              <button
-                class="secondary-action"
-                type="button"
-                disabled={
-                  busy() === "totp-verify" ||
-                  !verified().pendingTotp ||
-                  !totpLabel().trim() ||
-                  !totpCode().trim()
-                }
-                onClick={() => void verifyTotp()}
+                  <Show when={verified().totpLabels.length}>
+                    <div class="field-grid credential-two-column">
+                      <label>
+                        Registered TOTP
+                        <select
+                          value={totpRemoveLabel()}
+                          onChange={(event) => setTotpRemoveLabel(event.currentTarget.value)}
+                        >
+                          <option value="">Select TOTP</option>
+                          <For each={verified().totpLabels}>
+                            {(label) => <option value={label}>{label}</option>}
+                          </For>
+                        </select>
+                      </label>
+                      <button
+                        class="danger-action"
+                        type="button"
+                        disabled={busy() === "totp-remove" || !totpRemoveLabel().trim()}
+                        onClick={() => void removeTotp()}
+                      >
+                        <Trash2 size={16} />
+                        {busy() === "totp-remove" ? "Removing TOTP" : "Remove TOTP"}
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+              </WorkbenchSection>
+
+              <WorkbenchSection
+                id="unix"
+                title="Unix credential"
+                summary={`${verified().unixCredentialState} · ${
+                  verified().hasUnixCredential ? "Present" : "Missing"
+                }`}
               >
-                <ShieldCheck size={16} />
-                {busy() === "totp-verify" ? "Verifying TOTP" : "Verify TOTP"}
-              </button>
+                <div class="field-grid">
+                  <div class="credential-two-column">
+                    <label>
+                      New Unix credential
+                      <input
+                        id="kanidm-unix-credential-secret"
+                        name="kanidm_unix_credential_secret"
+                        type="password"
+                        value={unixPassword()}
+                        autocomplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        onInput={(event) => setUnixPassword(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      Confirm Unix credential
+                      <input
+                        id="kanidm-unix-credential-confirm"
+                        name="kanidm_unix_credential_confirm"
+                        type="password"
+                        value={unixConfirmPassword()}
+                        autocomplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        onInput={(event) => setUnixConfirmPassword(event.currentTarget.value)}
+                      />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "unix-password" ||
+                        !unixPassword().trim() ||
+                        !unixConfirmPassword().trim()
+                      }
+                      onClick={() => void stageUnixPassword()}
+                    >
+                      <ServerCog size={16} />
+                      {busy() === "unix-password"
+                        ? "Staging Unix credential"
+                        : "Stage Unix credential"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={busy() === "unix-remove"}
+                      onClick={() => void removeUnixPassword()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "unix-remove"
+                        ? "Removing Unix credential"
+                        : "Remove Unix credential"}
+                    </button>
+                  </div>
+                </div>
+              </WorkbenchSection>
+
+              <WorkbenchSection
+                id="ssh"
+                title="SSH public keys"
+                summary={`${verified().sshKeyCount} registered`}
+              >
+                <div class="field-grid">
+                  <label>
+                    SSH key label
+                    <input
+                      value={sshKeyLabel()}
+                      onInput={(event) => setSshKeyLabel(event.currentTarget.value)}
+                    />
+                  </label>
+                  <label>
+                    SSH public key
+                    <textarea
+                      rows={3}
+                      value={sshPublicKey()}
+                      onInput={(event) => setSshPublicKey(event.currentTarget.value)}
+                      placeholder="ssh-ed25519 AAAA..."
+                    />
+                  </label>
+                  <Show when={verified().sshKeyLabels.length}>
+                    <label>
+                      Registered SSH public key
+                      <select
+                        value={sshKeyRemoveLabel()}
+                        onChange={(event) => setSshKeyRemoveLabel(event.currentTarget.value)}
+                      >
+                        <option value="">Select SSH key</option>
+                        <For each={verified().sshKeyLabels}>
+                          {(label) => <option value={label}>{label}</option>}
+                        </For>
+                      </select>
+                    </label>
+                  </Show>
+                  <div class="review-box">
+                    <CircleAlert size={18} />
+                    <span>
+                      SSH public keys are parsed by Kanidm before staging. Commit only after
+                      reviewing the resulting key count and labels.
+                    </span>
+                  </div>
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={
+                        busy() === "ssh-key-add" || !sshKeyLabel().trim() || !sshPublicKey().trim()
+                      }
+                      onClick={() => void addSshKey()}
+                    >
+                      <KeyRound size={16} />
+                      {busy() === "ssh-key-add" ? "Adding SSH key" : "Add SSH key"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={
+                        busy() === "ssh-key-remove" ||
+                        !verified().sshKeyLabels.length ||
+                        !sshKeyRemoveLabel().trim()
+                      }
+                      onClick={() => void removeSshPublicKey()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "ssh-key-remove" ? "Removing SSH key" : "Remove SSH key"}
+                    </button>
+                  </div>
+                </div>
+              </WorkbenchSection>
+
+              <WorkbenchSection
+                id="backup"
+                title="Backup codes"
+                summary={
+                  verified().pendingBackupCodes.length
+                    ? `${verified().pendingBackupCodes.length} pending`
+                    : "No staged changes"
+                }
+              >
+                <div class="field-grid">
+                  <div class="button-row">
+                    <button
+                      class="secondary-action"
+                      type="button"
+                      disabled={busy() === "backup-codes"}
+                      onClick={() => void generateBackupCodes()}
+                    >
+                      <SquareAsterisk size={16} />
+                      {busy() === "backup-codes" ? "Generating codes" : "Generate backup codes"}
+                    </button>
+                    <button
+                      class="danger-action"
+                      type="button"
+                      disabled={busy() === "backup-code-remove"}
+                      onClick={() => void removeBackupCodes()}
+                    >
+                      <Trash2 size={16} />
+                      {busy() === "backup-code-remove" ? "Removing codes" : "Remove backup codes"}
+                    </button>
+                  </div>
+                  <Show when={verified().pendingBackupCodes.length}>
+                    <div class="code-grid" aria-label="Generated backup codes">
+                      <For each={verified().pendingBackupCodes}>
+                        {(code) => <code>{code}</code>}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </WorkbenchSection>
             </div>
-            <Show when={verified().totpLabels.length}>
-              <div class="field-grid">
-                <label>
-                  Registered TOTP
-                  <select
-                    value={totpRemoveLabel()}
-                    onChange={(event) => setTotpRemoveLabel(event.currentTarget.value)}
-                  >
-                    <option value="">Select TOTP</option>
-                    <For each={verified().totpLabels}>
-                      {(label) => <option value={label}>{label}</option>}
-                    </For>
-                  </select>
-                </label>
+
+            <div class="credential-commit-bar">
+              <div>
+                <strong>{verified().canCommit ? "Ready to commit" : "Changes not ready"}</strong>
+                <span>
+                  Stage the required credential changes, then commit once Kanidm allows the update.
+                </span>
+              </div>
+              <div class="button-row">
+                <button
+                  class="primary-action"
+                  type="button"
+                  disabled={!verified().canCommit || busy() === "commit"}
+                  onClick={() => void commit()}
+                >
+                  <ClipboardCheck size={16} />{" "}
+                  {busy() === "commit" ? "Committing" : "Commit update"}
+                </button>
                 <button
                   class="danger-action"
                   type="button"
-                  disabled={busy() === "totp-remove" || !totpRemoveLabel().trim()}
-                  onClick={() => void removeTotp()}
+                  disabled={busy() === "cancel"}
+                  onClick={() => void cancel()}
                 >
-                  <Trash2 size={16} />
-                  {busy() === "totp-remove" ? "Removing TOTP" : "Remove TOTP"}
+                  <Trash2 size={16} /> {busy() === "cancel" ? "Cancelling" : "Cancel update"}
                 </button>
               </div>
-            </Show>
-          </div>
-        )}
-      </Show>
-      <Show when={props.status()}>
-        {(verified) => (
-          <div class="button-row">
-            <button
-              class="primary-action"
-              type="button"
-              disabled={!verified().canCommit || busy() === "commit"}
-              onClick={() => void commit()}
-            >
-              <ClipboardCheck size={16} /> {busy() === "commit" ? "Committing" : "Commit update"}
-            </button>
-            <button
-              class="danger-action"
-              type="button"
-              disabled={busy() === "cancel"}
-              onClick={() => void cancel()}
-            >
-              <Trash2 size={16} /> {busy() === "cancel" ? "Cancelling" : "Cancel update"}
-            </button>
+            </div>
           </div>
         )}
       </Show>
