@@ -127,6 +127,10 @@ async function registerPasskeyWithReset(page, resetUrl) {
     timeout: 15000,
   });
 
+  const passkeysSection = page.getByRole("button", { name: /^Passkeys/ });
+  if ((await passkeysSection.count()) > 0 && (await passkeysSection.isVisible())) {
+    await passkeysSection.click();
+  }
   await page.getByRole("button", { name: "Start passkey setup" }).click();
   await page
     .getByText("Passkey setup started. Complete browser registration before commit.")
