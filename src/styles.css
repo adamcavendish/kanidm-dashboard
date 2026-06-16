@@ -511,10 +511,40 @@ code {
   font-size: 0.82rem;
 }
 
+.people-detail .session-panel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.people-detail .session-panel-summary span,
+.people-detail .session-terminal-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
 .session-list {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.people-detail .session-list {
+  gap: 8px;
+  margin-top: 0;
+  max-height: min(424px, 52vh);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .session-row {
@@ -537,6 +567,56 @@ code {
 .session-row span,
 .session-row small {
   color: var(--muted);
+}
+
+.people-detail .session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  justify-content: initial;
+  min-width: 0;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel-strong) 68%, transparent);
+}
+
+.people-detail .session-row.revoked {
+  background: color-mix(in srgb, var(--panel-strong) 42%, transparent);
+  opacity: 0.76;
+}
+
+.people-detail .session-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.people-detail .session-copy strong {
+  overflow: hidden;
+  color: var(--strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.94rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.people-detail .session-copy small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.people-detail .session-row .danger-action {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.people-detail .session-terminal-state {
+  justify-self: end;
+  border-color: color-mix(in srgb, var(--muted) 18%, var(--line));
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
 }
 
 .portal-layout,
@@ -717,6 +797,37 @@ td small,
 .profile-edit-grid,
 .person-ops-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.person-summary-grid {
+  gap: 10px;
+}
+
+.person-summary-grid .key-value-detail {
+  grid-template-columns: 1fr;
+  gap: 7px;
+  min-height: 78px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 58%, transparent);
+}
+
+.person-summary-grid .key-value-detail span {
+  font-size: 0.74rem;
+  font-weight: 760;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.person-summary-grid .key-value-detail strong {
+  align-self: start;
+  font-size: 0.96rem;
+  line-height: 1.28;
+}
+
+.person-summary-grid .key-value-detail .status-badge {
+  justify-self: start;
 }
 
 .group-toggle-grid {
@@ -2400,9 +2511,26 @@ td small {
   display: grid;
   place-items: center;
   min-height: 220px;
+  padding: 24px;
   border: 1px dashed color-mix(in srgb, var(--accent) 36%, var(--line));
   border-radius: 8px;
-  color: var(--accent);
+  color: var(--muted);
+  text-align: center;
+}
+
+.qr-preview img {
+  width: min(246px, 100%);
+  height: auto;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, white);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.qr-preview span {
+  max-width: 260px;
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .table-app {
@@ -2413,23 +2541,33 @@ td small {
 
 .detail-actions {
   display: grid;
-  gap: 14px;
-  margin-top: 18px;
+  gap: 12px;
+  margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
 .detail-action-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: center;
 }
 
 .people-detail .detail-action-row > button {
-  flex: 1 1 176px;
+  width: 100%;
   min-width: 0;
-  white-space: normal;
+  white-space: nowrap;
+}
+
+.person-primary-actions > button:last-child {
+  grid-column: 1 / -1;
+}
+
+.people-detail .credential-meter {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .compact-warning {
@@ -2648,6 +2786,15 @@ td small {
   .session-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .people-detail .session-row {
+    grid-template-columns: 1fr;
+  }
+
+  .people-detail .session-row .danger-action,
+  .people-detail .session-terminal-state {
+    justify-self: start;
   }
 
   .segmented {

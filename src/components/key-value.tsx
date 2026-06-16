@@ -10,7 +10,9 @@ export default function KeyValue(props: {
   return (
     <div class={className()}>
       <span>{props.label}</span>
-      <strong>{props.value}</strong>
+      <strong title={typeof props.value === "string" ? props.value : undefined}>
+        {props.value}
+      </strong>
     </div>
   );
 }

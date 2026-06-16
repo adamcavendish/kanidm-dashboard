@@ -110,6 +110,10 @@ export function PeoplePage() {
     if (!person) return [];
     return state().groups.filter((group) => person.groups.includes(group.id));
   });
+  const activeSessionCount = createMemo(
+    () => sessions().filter((session) => session.state !== "revoked").length,
+  );
+  const revokedSessionCount = createMemo(() => sessions().length - activeSessionCount());
   let adminRefreshRequest = 0;
 
   function setStatusChoice(nextStatus: UserStatus) {
@@ -122,6 +126,10 @@ export function PeoplePage() {
 
   function isSelectedPerson(personId: string) {
     return selectedPerson()?.id === personId;
+  }
+
+  function sessionRowClass(session: UserAuthTokenStatus) {
+    return session.state === "revoked" ? "session-row revoked" : "session-row";
   }
 
   createEffect(() => {
@@ -517,7 +525,7 @@ export function PeoplePage() {
                 </div>
                 <CredentialMeter person={person()} />
                 <div class="detail-actions">
-                  <div class="detail-action-row">
+                  <div class="detail-action-row person-primary-actions">
                     <button
                       class="primary-action"
                       type="button"
@@ -721,26 +729,38 @@ export function PeoplePage() {
                 <GlassPanel title="Sessions">
                   <Show
                     when={sessions().length}
-                    fallback={<p class="muted">No active sessions returned.</p>}
+                    fallback={<p class="muted">No sessions returned.</p>}
                   >
-                    <For each={sessions()}>
-                      {(session) => (
-                        <div class="session-row">
-                          <div>
-                            <strong>{shortId(session.sessionId)}</strong>
-                            <small>{sessionStateLabel(session)}</small>
+                    <div class="session-panel-summary">
+                      <span>{sessions().length} total</span>
+                      <span>{activeSessionCount()} active</span>
+                      <span>{revokedSessionCount()} revoked</span>
+                    </div>
+                    <div class="session-list" role="list" aria-label="User sessions">
+                      <For each={sessions()}>
+                        {(session) => (
+                          <div class={sessionRowClass(session)} role="listitem">
+                            <div class="session-copy">
+                              <strong>{shortId(session.sessionId)}</strong>
+                              <small>{sessionStateLabel(session)}</small>
+                            </div>
+                            <Show
+                              when={session.state !== "revoked"}
+                              fallback={<span class="session-terminal-state">Revoked</span>}
+                            >
+                              <button
+                                class="danger-action"
+                                type="button"
+                                disabled={busy() === "session-delete"}
+                                onClick={() => void revokeSession(person(), session.sessionId)}
+                              >
+                                <Trash2 size={15} /> Revoke
+                              </button>
+                            </Show>
                           </div>
-                          <button
-                            class="danger-action"
-                            type="button"
-                            disabled={busy() === "session-delete"}
-                            onClick={() => void revokeSession(person(), session.sessionId)}
-                          >
-                            <Trash2 size={15} /> Revoke
-                          </button>
-                        </div>
-                      )}
-                    </For>
+                        )}
+                      </For>
+                    </div>
                   </Show>
                 </GlassPanel>
 

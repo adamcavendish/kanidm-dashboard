@@ -1,5 +1,6 @@
-import { createSignal, Show } from "solid-js";
-import { CircleAlert, ClipboardCheck, QrCode } from "lucide-solid";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
+import QRCode from "qrcode";
+import { CircleAlert, ClipboardCheck } from "lucide-solid";
 import type { CredentialUpdateIntent } from "../domain";
 import { useConsole } from "../store";
 import Checklist from "../components/checklist";
@@ -10,8 +11,42 @@ import { formatDateTime } from "../utils/format";
 export function EnrolPage() {
   const { currentUser, issueCredentialUpdateIntent } = useConsole();
   const [intent, setIntent] = createSignal<CredentialUpdateIntent | null>(null);
+  const [qrCodeUrl, setQrCodeUrl] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
+  let qrRenderRequest = 0;
+  const resetUrl = createMemo(() => {
+    const issued = intent();
+    if (!issued) return "";
+    return `${window.location.origin}/reset?token=${encodeURIComponent(issued.token)}`;
+  });
+
+  createEffect(() => {
+    const url = resetUrl();
+    if (!url) {
+      setQrCodeUrl("");
+      return;
+    }
+    const requestId = ++qrRenderRequest;
+    void QRCode.toDataURL(url, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      scale: 8,
+      color: {
+        dark: "#111827",
+        light: "#ffffff",
+      },
+    })
+      .then((dataUrl) => {
+        if (requestId === qrRenderRequest) setQrCodeUrl(dataUrl);
+      })
+      .catch(() => {
+        if (requestId === qrRenderRequest) {
+          setQrCodeUrl("");
+          setError("Could not render enrolment QR code.");
+        }
+      });
+  });
 
   async function generateIntent() {
     setBusy(true);
@@ -31,7 +66,12 @@ export function EnrolPage() {
       <div class="two-column">
         <GlassPanel title="Credential update intent">
           <div class="qr-preview">
-            <QrCode size={122} />
+            <Show
+              when={qrCodeUrl()}
+              fallback={<span>Generate an intent to show the enrolment QR code.</span>}
+            >
+              {(src) => <img src={src()} alt="Credential update reset URL QR code" />}
+            </Show>
           </div>
           <p class="muted">Scan to continue credential update on another device.</p>
           <button
@@ -48,10 +88,7 @@ export function EnrolPage() {
                 <KeyValue label="Expires" value={formatDateTime(issued().expiryTime)} />
                 <label>
                   Reset URL
-                  <input
-                    readonly
-                    value={`${window.location.origin}/reset?token=${encodeURIComponent(issued().token)}`}
-                  />
+                  <input readonly value={resetUrl()} />
                 </label>
               </div>
             )}
