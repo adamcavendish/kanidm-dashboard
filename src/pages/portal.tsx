@@ -1,5 +1,6 @@
-import { For, Show } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { AppWindow, ChevronRight } from "lucide-solid";
+import type { UserAuthTokenStatus } from "../domain";
 import { useConsole } from "../store";
 import AppIcon from "../components/app-icon";
 import GlassPanel from "../components/glass-panel";
@@ -9,16 +10,30 @@ import { CredentialMeter } from "../components/credential-meter";
 import { EmptyState } from "../components/empty-state";
 import { StatusBadge } from "../components/status-badge";
 import { Link } from "../routing";
+import { latestSessionLabel } from "../utils/format";
 
 function AccountPanels() {
-  const { currentUser } = useConsole();
+  const { currentUser, getUserAuthTokens } = useConsole();
+  const [sessions, setSessions] = createSignal<UserAuthTokenStatus[]>([]);
+  const [sessionStatus, setSessionStatus] = createSignal("Loading sessions");
+
+  onMount(async () => {
+    try {
+      setSessions(await getUserAuthTokens());
+      setSessionStatus("");
+    } catch {
+      setSessionStatus("Unavailable");
+    }
+  });
+
+  const latestSession = () => sessionStatus() || latestSessionLabel(sessions());
 
   return (
     <>
       <GlassPanel title="Account">
         <KeyValue label="Username" value={currentUser().username} />
         <KeyValue label="Status" value={<StatusBadge status={currentUser().status} />} />
-        <KeyValue label="Last auth" value={currentUser().lastAuth} />
+        <KeyValue label="Latest session" value={latestSession()} />
         <div class="button-row">
           <Link class="secondary-action" href="/profile">
             Profile

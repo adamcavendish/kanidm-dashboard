@@ -59,6 +59,17 @@ export function sessionStateLabel(session: UserAuthTokenStatus) {
   return `Expires ${formatDateTime(session.state.expiresAt)}`;
 }
 
+export function latestSessionLabel(sessions: UserAuthTokenStatus[]) {
+  const latest = sessions.reduce<UserAuthTokenStatus | null>((currentLatest, session) => {
+    if (!session.issuedAt) return currentLatest;
+    if (!currentLatest) return session;
+    return Date.parse(session.issuedAt) > Date.parse(currentLatest.issuedAt)
+      ? session
+      : currentLatest;
+  }, null);
+  return latest ? formatDateTime(latest.issuedAt) : "No sessions";
+}
+
 export function shortId(value: string) {
   return value.length > 12 ? value.slice(0, 8) : value;
 }

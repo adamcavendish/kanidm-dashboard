@@ -255,7 +255,7 @@ function personFixture(overrides = {}) {
       shell: "/bin/zsh",
       credentialSet: true,
     },
-    lastAuth: "2026-05-29 09:12",
+    lastAuth: "Unknown",
     ...overrides,
   };
 }
@@ -337,7 +337,7 @@ function largeRelationshipState() {
         email: `long.user.${index}@aster.example`,
         status: index % 5 === 0 ? "expiring" : "active",
         groups: [teamId],
-        lastAuth: `2026-05-${String(10 + (index % 18)).padStart(2, "0")} 10:15`,
+        lastAuth: "Unknown",
       }),
     );
     apps.push({

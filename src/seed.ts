@@ -40,7 +40,7 @@ export const seedPeople: Person[] = [
       shell: "/bin/zsh",
       credentialSet: true,
     },
-    lastAuth: "2026-05-29 09:12",
+    lastAuth: "Unknown",
   },
   {
     id: "u-mika",
@@ -64,7 +64,7 @@ export const seedPeople: Person[] = [
       shell: "/bin/bash",
       credentialSet: true,
     },
-    lastAuth: "2026-05-29 08:43",
+    lastAuth: "Unknown",
   },
   {
     id: "u-rin",
@@ -89,7 +89,7 @@ export const seedPeople: Person[] = [
       shell: "",
       credentialSet: false,
     },
-    lastAuth: "2026-05-28 18:30",
+    lastAuth: "Unknown",
   },
   {
     id: "u-sam",
@@ -113,7 +113,7 @@ export const seedPeople: Person[] = [
       shell: "",
       credentialSet: false,
     },
-    lastAuth: "2026-05-19 11:04",
+    lastAuth: "Unknown",
   },
 ];
 
