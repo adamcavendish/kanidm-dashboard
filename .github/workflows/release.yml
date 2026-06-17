@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]*"
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    name: Create GitHub Release from CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read changelog entry for ${{ github.ref_name }}
+        id: changelog
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          version: ${{ github.ref_name }}
+          path: ./CHANGELOG.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ steps.changelog.outputs.version }}" \
+            --notes-file "${{ steps.changelog.outputs.changes_file }}" \
+            ${{ steps.changelog.outputs.status == 'prereleased' && '--prerelease' || '' }} \
+            ${{ steps.changelog.outputs.status == 'unreleased' && '--draft' || '' }}

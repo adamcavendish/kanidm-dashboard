@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.5 (2026-06-17)
+
+### Fixes
+
+- Credential UX polish: improve layout, guide reset workbench, and use direct self-service sessions
+- Expand passkeys in WebAuthn E2E test
+
+### Internal
+
+- Bump vite-plus dev dependency
+
 ## 0.0.4 (2026-06-09)
 
 ### Rename
